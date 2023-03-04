@@ -6027,6 +6027,27 @@ public class Theme {
         return combinedDrawable;
     }
 
+    public static Drawable createCircularDrawable(int size, Drawable drawable) {
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+
+        drawable.setBounds(0, 0, size, size);
+        drawable.draw(canvas);
+
+        Bitmap circleBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas circleCanvas = new Canvas(circleBitmap);
+        Paint paint = new Paint();
+        paint.setAntiAlias(true);
+        paint.setColor(Color.BLACK);
+
+        circleCanvas.drawCircle(size / 2f, size / 2f, size / 2f, paint);
+        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
+
+        circleCanvas.drawBitmap(bitmap, 0, 0, paint);
+
+        return new BitmapDrawable(Resources.getSystem(), circleBitmap);
+    }
+
     public static Drawable createRoundRectDrawableWithIcon(int rad, int iconRes) {
         ShapeDrawable defaultDrawable = new ShapeDrawable(new RoundRectShape(new float[]{rad, rad, rad, rad, rad, rad, rad, rad}, null, null));
         defaultDrawable.getPaint().setColor(0xffffffff);

@@ -2,6 +2,8 @@ package org.telegram.ui.Components.voip;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
@@ -161,8 +163,13 @@ public class VoIPWindowView extends FrameLayout {
 
     public void startEnterTransition() {
         if (!lockOnScreen) {
-            setTranslationX(getMeasuredWidth());
-            animate().translationX(0).setDuration(150).setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+            AnimatorSet anim = new AnimatorSet();
+            ObjectAnimator alpha = ObjectAnimator.ofFloat(this, View.ALPHA, 0, 1).setDuration(166);
+            alpha.setInterpolator(new CubicBezierInterpolator(0.33, 0.00, 0.67, 1.00));
+            ObjectAnimator transY = ObjectAnimator.ofFloat(this, View.TRANSLATION_Y, AndroidUtilities.dp(120), 0).setDuration(433);
+            transY.setInterpolator(new CubicBezierInterpolator(0.33, 0.00, 0.04, 1.00));
+            anim.playTogether(alpha, transY);
+            anim.start();
         }
     }
 

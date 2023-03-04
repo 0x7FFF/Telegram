@@ -6285,4 +6285,10 @@
     <string name="LitePowerSaverInfo">Automatically switch to low power usage when your devices is in Battery Saving Mode.</string>
     <string name="DynamicPackOrder">Dynamic Pack Order</string>
     <string name="DynamicPackOrderInfo">Automatically place recently used sticker packs at the front of the panel.</string>
+    <string name="VoipWeakNetwork">Weak network signal</string>
+    <string name="VoipEncryptionKeyTitle">This call is end-to-end encrypted</string>
+    <string name="VoipEncryptionKeyTooltip">Encryption key of this call</string>
+    <string name="VoipHideEmoji">Hide Emoji</string>
+    <string name="VoipRateTitle">Rate this call</string>
+    <string name="VoipOwnMicrophoneIsOff">Your microphone is turned off</string>
 </resources>

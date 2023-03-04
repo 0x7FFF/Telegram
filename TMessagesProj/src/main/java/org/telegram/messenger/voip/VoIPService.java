@@ -55,6 +55,7 @@ import android.media.audiofx.NoiseSuppressor;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -71,7 +72,6 @@ import android.telephony.TelephonyManager;
 import android.text.SpannableString;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
-import android.util.Log;
 import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.View;
@@ -194,6 +194,10 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 
 	private TLRPC.Chat chat;
 
+	public int overdrawState = 0;
+	// 0 - calling.
+	// 1 - overdrawing.
+	// 2 - overdraw should not be done anymore.
 	private boolean isVideoAvailable;
 	private boolean notificationsDisabled;
 	private boolean switchingCamera;
@@ -2676,10 +2680,9 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 									LocaleController.getString("VoipAudioRoutingSpeaker", R.string.VoipAudioRoutingSpeaker),
 									isHeadsetPlugged ? LocaleController.getString("VoipAudioRoutingHeadset", R.string.VoipAudioRoutingHeadset) : LocaleController.getString("VoipAudioRoutingEarpiece", R.string.VoipAudioRoutingEarpiece),
 									currentBluetoothDeviceName != null ? currentBluetoothDeviceName : LocaleController.getString("VoipAudioRoutingBluetooth", R.string.VoipAudioRoutingBluetooth)},
-							new int[]{R.drawable.calls_menu_speaker,
-									isHeadsetPlugged ? R.drawable.calls_menu_headset : R.drawable.calls_menu_phone,
-									R.drawable.calls_menu_bluetooth}, (dialog, which) -> {
-								if (getSharedInstance() == null) {
+						new int[]{R.drawable.msg_call_speaker,
+							isHeadsetPlugged ? R.drawable.calls_menu_headset : R.drawable.msg_call_earpiece,
+							R.drawable.msg_call_bluetooth}, (dialog, which) -> {								if (getSharedInstance() == null) {
 									return;
 								}
 								setAudioOutput(which);
@@ -3410,9 +3413,15 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 				e.printStackTrace();
 			}
 		}
-		
-		if (needRateCall || forceRating || finalState.isRatingSuggested) {
-			startRatingActivity();
+
+//		if (needRateCall || forceRating || finalState.isRatingSuggested) {
+		if(true) {
+			VoIPFragment fragment = VoIPFragment.getInstance();
+			if (fragment != null){
+				fragment.showRatingScreen(privateCall);
+			} else {
+				startRatingActivity();
+			}
 			needRateCall = false;
 		}
 		if (needSendDebugLog && finalState.debugLog != null) {
@@ -3704,6 +3713,10 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 				FileLog.d("proximity " + newIsNear);
 			}
 			isProximityNear = newIsNear;
+			for(StateListener listener : stateListeners){
+				listener.onProximitySensorChange(isProximityNear);
+			}
+
 			try {
 				if (isProximityNear) {
 					proximityWakelock.acquire();
@@ -3799,7 +3812,29 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			}
 		} else {
 			lastNetInfo = getActiveNetworkInfo();
+			if (overdrawState == 2) {
+				if (isWeakNetwork(lastNetInfo)) {
+					VoIPFragment.getInstance().onWeakNetwork();
+				} else {
+					VoIPFragment.getInstance().onNormalNetwork();
+				}
+			}
 		}
+	}
+
+	private boolean isWeakNetwork(NetworkInfo activeNetwork) {
+		if (activeNetwork != null && activeNetwork.isConnected()) {
+			if (activeNetwork.getType() == ConnectivityManager.TYPE_WIFI) {
+				WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+				int signalLevel = WifiManager.calculateSignalLevel(wifiManager.getConnectionInfo().getRssi(), 5);
+				return signalLevel < 2; // Consider signal level < 2 as a weak connection
+			} else if (activeNetwork.getType() == ConnectivityManager.TYPE_MOBILE) {
+				TelephonyManager telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+				int signalStrength = telephonyManager.getSignalStrength().getGsmSignalStrength();
+				return signalStrength < 3; // Consider signal strength < 3 as a weak connection
+			}
+		}
+		return false;
 	}
 
 	private int getNetworkType() {
@@ -4210,6 +4245,8 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 			}
 		});
 
+		overdrawState = 2;
+
 		if (connectingSoundRunnable != null) {
 			AndroidUtilities.cancelRunOnUIThread(connectingSoundRunnable);
 			connectingSoundRunnable = null;
@@ -4413,6 +4450,10 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 		}
 
 		default void onScreenOnChange(boolean screenOn) {
+
+		}
+
+		default void onProximitySensorChange(boolean isNear) {
 
 		}
 	}

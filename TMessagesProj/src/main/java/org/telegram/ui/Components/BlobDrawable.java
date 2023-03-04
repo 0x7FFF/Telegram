@@ -104,7 +104,7 @@ public class BlobDrawable {
         if (!LiteMode.isEnabled(LiteMode.FLAG_CALLS_ANIMATIONS)) {
             return;
         }
-        path.reset();
+        path.rewind();
 
         for (int i = 0; i < N; i++) {
             float progress = this.progress[i];
