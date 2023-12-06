@@ -67,7 +67,6 @@ import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ImageSpan;
 import android.text.style.URLSpan;
-import android.util.Log;
 import android.util.Pair;
 import android.util.Property;
 import android.util.SparseArray;
@@ -305,6 +304,7 @@ import org.telegram.ui.Components.URLSpanUserMention;
 import org.telegram.ui.Components.UndoView;
 import org.telegram.ui.Components.UnreadCounterTextView;
 import org.telegram.ui.Components.ViewHelper;
+import org.telegram.ui.Components.spoilers.DeleteEffect;
 import org.telegram.ui.Components.spoilers.SpoilerEffect;
 import org.telegram.ui.Components.voip.CellFlickerDrawable;
 import org.telegram.ui.Components.voip.VoIPHelper;
@@ -901,6 +901,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
     private ChatMessageCell dummyMessageCell;
     private FireworksOverlay fireworksOverlay;
+    private DeleteEffect deleteOverlay;
 
     private boolean swipeBackEnabled = true;
 
@@ -6927,6 +6928,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         bottomOverlayChat.setPadding(0, AndroidUtilities.dp(1.5f), 0, 0);
         bottomOverlayChat.setVisibility(View.INVISIBLE);
         bottomOverlayChat.setClipChildren(false);
+        if (DeleteEffect.supports()) {
+            deleteOverlay = new DeleteEffect(context);
+            contentView.addView(deleteOverlay, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        }
         contentView.addView(bottomOverlayChat, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 51, Gravity.BOTTOM));
 
         bottomOverlayStartButton = new TextView(context) {
@@ -20702,6 +20707,19 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             }
         }
 
+        final List<MessageObject> messageObjects = new ArrayList<>(markAsDeletedMessages.size());
+        for (int i = 0; i < size; i++) {
+            Integer mid = markAsDeletedMessages.get(i);
+            MessageObject obj = messagesDict[loadIndex].get(mid);
+            if (obj != null) {
+                messageObjects.add(obj);
+            }
+        }
+
+        if (deleteOverlay != null) {
+            animateDelete(messageObjects);
+        }
+
         int commentsDeleted = 0;
         for (int a = 0; a < size; a++) {
             Integer mid = markAsDeletedMessages.get(a);
@@ -23692,6 +23710,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         if (scrimPopupWindow != null) {
             scrimPopupWindow.setPauseNotifications(false);
             closeMenu();
+        }
+        if (deleteOverlay != null) {
+            deleteOverlay.stopAndClear();
         }
         int replyId = threadMessageId;
         getMessagesController().markDialogAsReadNow(dialog_id, replyId);
@@ -33456,6 +33477,24 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         } else {
             cell.setClickable(false);
         }
+    }
+
+    public void animateDelete(@NonNull List<MessageObject> messageObjects) {
+        int count = chatListView.getChildCount();
+        List<ChatMessageCell> cells = new ArrayList<>(messageObjects.size());
+        for (MessageObject messageObject : messageObjects) {
+            for (int i = 0; i < count; i++) {
+                View child = chatListView.getChildAt(i);
+                if (child instanceof ChatMessageCell) {
+                    ChatMessageCell cell = (ChatMessageCell) child;
+                    if (cell.getMessageObject() == messageObject) {
+                        cells.add(cell);
+                        break;
+                    }
+                }
+            }
+        }
+        deleteOverlay.launchAnimation(cells);
     }
 
     @Override
