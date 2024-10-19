@@ -350,6 +350,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private LinkSpanDrawable.LinksTextView bottomOverlayLinksText;
     private TextView bottomOverlayText;
     private TextView bottomOverlayStartButton;
+    private HintView2 botHintView;
     private ImageView bottomOverlayImage;
     private RadialProgressView bottomOverlayProgress;
     private AnimatorSet bottomOverlayAnimation;
@@ -7948,7 +7949,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         };
         bottomOverlayStartButton.setBackground(Theme.AdaptiveRipple.filledRect(getThemedColor(Theme.key_featuredStickers_addButton), 8));
         bottomOverlayStartButton.setTextColor(getThemedColor(Theme.key_featuredStickers_buttonText));
-        bottomOverlayStartButton.setText(LocaleController.getString(R.string.BotStart));
+        bottomOverlayStartButton.setText("Start Bot");
         bottomOverlayStartButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         bottomOverlayStartButton.setGravity(Gravity.CENTER);
         bottomOverlayStartButton.setTypeface(AndroidUtilities.bold());
@@ -7957,6 +7958,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         bottomOverlayChat.addView(bottomOverlayStartButton, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER, 8, 8, 8, 8));
 
         if (currentUser != null && currentUser.bot && currentUser.id != UserObject.VERIFY && !UserObject.isDeleted(currentUser) && !UserObject.isReplyUser(currentUser) && !isInScheduleMode() && chatMode != MODE_PINNED && chatMode != MODE_SAVED && !isReport()) {
+            showBotHint();
             bottomOverlayStartButton.setVisibility(View.VISIBLE);
             bottomOverlayChat.setVisibility(View.VISIBLE);
         }
@@ -40106,5 +40108,23 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     @Override
     public boolean allowFinishFragmentInsteadOfRemoveFromStack() {
         return !inPreviewMode;
+    }
+
+    private void showBotHint() {
+        Activity context = getParentActivity();
+        botHintView = new HintView2(context, HintView2.DIRECTION_BOTTOM);
+        botHintView.setVisibility(View.VISIBLE);
+        botHintView.setMultilineText(false);
+        botHintView.setTextAlign(Layout.Alignment.ALIGN_CENTER);
+        botHintView.setText("Tap Here to use this Bot");
+        botHintView.setIcon(AppCompatResources.getDrawable(context, R.drawable.arrow_botstart));
+        botHintView.setMaxWidthPx(HintView2.cutInFancyHalf(botHintView.getText(), botHintView.getTextPaint()));
+        contentView.addView(botHintView, LayoutHelper.createFrame(
+                LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL,
+                16, 0, 16, chatActivityEnterView.getMeasuredHeight() + AndroidUtilities.dp(28)
+        ));
+        botHintView.show();
+        botHintView.setOnClickListener(v -> botHintView.hide());
     }
 }
