@@ -108,7 +108,6 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.appcompat.content.res.AppCompatResources;
 import androidx.collection.LongSparseArray;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -40118,7 +40117,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         botHintView.setMultilineText(false);
         botHintView.setTextAlign(Layout.Alignment.ALIGN_CENTER);
         botHintView.setText("Tap Here to use this Bot");
-        botHintView.setIcon(AppCompatResources.getDrawable(context, R.drawable.arrow_botstart));
+        botHintView.setIcon(ContextCompat.getDrawable(context, R.drawable.arrow_botstart));
         botHintView.setMaxWidthPx(HintView2.cutInFancyHalf(botHintView.getText(), botHintView.getTextPaint()));
         contentView.addView(botHintView, LayoutHelper.createFrame(
                 LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT,
