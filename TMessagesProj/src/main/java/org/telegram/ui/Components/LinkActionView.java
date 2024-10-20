@@ -52,6 +52,7 @@ import org.telegram.ui.Cells.DialogCell;
 import org.telegram.ui.ManageLinksActivity;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public class LinkActionView extends LinearLayout {
 
@@ -219,42 +220,23 @@ public class LinkActionView extends LinearLayout {
         });
 
         optionsView.setOnClickListener(view -> {
+            List<SubItem> subItems = getSubItems();
+
+            if (subItems.size() == 1) {
+                SubItem singleItem = subItems.get(0);
+                singleItem.action.run();
+                return;
+            }
+
             if (actionBarPopupWindow != null) {
                 return;
             }
-            ActionBarPopupWindow.ActionBarPopupWindowLayout layout = new ActionBarPopupWindow.ActionBarPopupWindowLayout(context);
 
-            ActionBarMenuSubItem subItem;
-            if (!this.permanent && canEdit) {
-                subItem = new ActionBarMenuSubItem(context, true, false);
-                subItem.setTextAndIcon(LocaleController.getString(R.string.Edit), R.drawable.msg_edit);
-                layout.addView(subItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
-                subItem.setOnClickListener(view12 -> {
-                    if (actionBarPopupWindow != null) {
-                        actionBarPopupWindow.dismiss();
-                    }
-                    delegate.editLink();
-                });
-            }
+            ActionBarPopupWindow.ActionBarPopupWindowLayout layout = new ActionBarPopupWindow.ActionBarPopupWindowLayout(getContext());
 
-            subItem = new ActionBarMenuSubItem(context, true, false);
-            subItem.setTextAndIcon(LocaleController.getString(R.string.GetQRCode), R.drawable.msg_qrcode);
-            layout.addView(subItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
-            subItem.setOnClickListener(view12 -> {
-                showQrCode();
-            });
-
-            if (!hideRevokeOption) {
-                subItem = new ActionBarMenuSubItem(context, false, true);
-                subItem.setTextAndIcon(LocaleController.getString(R.string.RevokeLink), R.drawable.msg_delete);
-                subItem.setColors(Theme.getColor(Theme.key_text_RedRegular), Theme.getColor(Theme.key_text_RedRegular));
-                subItem.setOnClickListener(view1 -> {
-                    if (actionBarPopupWindow != null) {
-                        actionBarPopupWindow.dismiss();
-                    }
-                    revokeLink();
-                });
-                layout.addView(subItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
+            for (SubItem subItem : subItems) {
+                ActionBarMenuSubItem menuItem = getActionBarMenuSubItem(subItem);
+                layout.addView(menuItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
             }
 
             FrameLayout container;
@@ -350,7 +332,53 @@ public class LinkActionView extends LinearLayout {
             }
         });
         updateColors();
+        updateOptionsView();
     }
+
+    @NonNull
+    private ActionBarMenuSubItem getActionBarMenuSubItem(SubItem subItem) {
+        ActionBarMenuSubItem menuItem = new ActionBarMenuSubItem(getContext(), subItem.isFirst, subItem.isLast);
+        menuItem.setTextAndIcon(subItem.text, subItem.iconResId);
+        if (subItem.color != 0) {
+            menuItem.setColors(subItem.color, subItem.color);
+        }
+        menuItem.setOnClickListener(v -> {
+            if (actionBarPopupWindow != null) {
+                actionBarPopupWindow.dismiss();
+            }
+            subItem.action.run();
+        });
+        return menuItem;
+    }
+
+    private void updateOptionsView() {
+        List<SubItem> subItems = getSubItems();
+        if (subItems.size() == 1) {
+            SubItem singleItem = subItems.get(0);
+            optionsView.setImageResource(singleItem.iconResId);
+            optionsView.setContentDescription(singleItem.text);
+        } else {
+            optionsView.setImageResource(R.drawable.ic_ab_other);
+            optionsView.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));
+        }
+    }
+
+    private List<SubItem> getSubItems() {
+        List<SubItem> subItems = new ArrayList<>();
+
+        if (!this.permanent && canEdit) {
+            subItems.add(new SubItem(LocaleController.getString(R.string.Edit), R.drawable.msg_edit, delegate::editLink));
+        }
+
+        subItems.add(new SubItem(LocaleController.getString(R.string.GetQRCode), R.drawable.msg_qrcode, this::showQrCode));
+
+        if (!hideRevokeOption) {
+            subItems.add(new SubItem(LocaleController.getString(R.string.RevokeLink), R.drawable.msg_delete, this::revokeLink, Theme.getColor(Theme.key_text_RedRegular)));
+        }
+
+        return subItems;
+    }
+
 
     public void showBulletin(int resId, CharSequence str) {
         Bulletin b = BulletinFactory.of(fragment).createSimpleBulletin(resId, str);
@@ -446,6 +474,7 @@ public class LinkActionView extends LinearLayout {
             copyView.setVisibility(View.VISIBLE);
             removeView.setVisibility(View.GONE);
         }
+        updateOptionsView();
     }
 
     public void showOptions(boolean b) {
@@ -455,8 +484,7 @@ public class LinkActionView extends LinearLayout {
     public void hideRevokeOption(boolean b) {
         if (hideRevokeOption != b) {
             hideRevokeOption = b;
-            optionsView.setVisibility(View.VISIBLE);
-            optionsView.setImageDrawable(ContextCompat.getDrawable(optionsView.getContext(), R.drawable.ic_ab_other));
+            updateOptionsView();
         }
     }
 
@@ -616,5 +644,26 @@ public class LinkActionView extends LinearLayout {
 
     public void setCanEdit(boolean canEdit) {
         this.canEdit = canEdit;
+        updateOptionsView();
+    }
+
+    private static class SubItem {
+        String text;
+        int iconResId;
+        Runnable action;
+        int color;
+        boolean isFirst;
+        boolean isLast;
+
+        SubItem(String text, int iconResId, Runnable action) {
+            this(text, iconResId, action, 0);
+        }
+
+        SubItem(String text, int iconResId, Runnable action, int color) {
+            this.text = text;
+            this.iconResId = iconResId;
+            this.action = action;
+            this.color = color;
+        }
     }
 }
