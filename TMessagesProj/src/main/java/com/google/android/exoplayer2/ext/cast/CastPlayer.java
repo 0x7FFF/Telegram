@@ -163,7 +163,7 @@ public final class CastPlayer extends BasePlayer {
      * @param castContext The context from which the cast session is obtained.
      */
     public CastPlayer(CastContext castContext) {
-        this(castContext, new DefaultMediaItemConverter());
+        this(castContext, new CustomMediaItemConverter());
     }
 
     /**
@@ -1032,6 +1032,12 @@ public final class CastPlayer extends BasePlayer {
     private boolean updateTimeline() {
         CastTimeline oldTimeline = currentTimeline;
         MediaStatus status = getMediaStatus();
+        if (timelineTracker == null) {
+            Log.w("A", "A");
+        }
+        if (remoteMediaClient == null) {
+            Log.w("B", "B");
+        }
         currentTimeline =
                 status != null
                         ? timelineTracker.getCastTimeline(remoteMediaClient)
@@ -1378,7 +1384,10 @@ public final class CastPlayer extends BasePlayer {
 
         @Override
         public void onStatusUpdated() {
-            updateInternalStateAndNotifyIfChanged();
+            MediaStatus mediaStatus = remoteMediaClient.getMediaStatus();
+            if (mediaStatus != null) {
+                updateInternalStateAndNotifyIfChanged();
+            }
         }
 
         @Override

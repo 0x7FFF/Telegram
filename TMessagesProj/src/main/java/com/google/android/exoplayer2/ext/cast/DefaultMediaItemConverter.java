@@ -31,12 +31,9 @@ import java.util.UUID;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/**
- * Default {@link MediaItemConverter} implementation.
- */
-public final class DefaultMediaItemConverter implements MediaItemConverter {
+public class DefaultMediaItemConverter implements MediaItemConverter {
 
-    private static final String KEY_MEDIA_ITEM = "mediaItem";
+    protected static final String KEY_MEDIA_ITEM = "mediaItem";
     private static final String KEY_PLAYER_CONFIG = "exoPlayerConfig";
     private static final String KEY_MEDIA_ID = "mediaId";
     private static final String KEY_URI = "uri";

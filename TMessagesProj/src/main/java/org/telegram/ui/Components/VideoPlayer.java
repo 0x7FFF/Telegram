@@ -87,6 +87,8 @@ import com.google.android.gms.cast.framework.media.RemoteMediaClient;
 import com.google.android.gms.common.api.PendingResult;
 import com.google.android.gms.common.api.Status;
 
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.DispatchQueue;
@@ -263,20 +265,29 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         //Crash on stories
         if (!isStory) {
             try {
-                castContext = CastContext.getSharedInstance();
-                currentCastSession = castContext.getSessionManager().getCurrentCastSession();
-                castPlayer = new CastPlayer(castContext);
-                currentPlayer = player;
-                castContext.addCastStateListener(castStateListener);
-                castContext.getSessionManager().addSessionManagerListener(sessionManagerListener, Session.class);
-                castPlayer.setRepeatMode(looping ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
-                castPlayer.addListener(this);
-                castPlayer.setPlayWhenReady(autoplay);
+                initCastPlayer();
             } catch (Exception e) {
                 FileLog.e("Cast initialization failed", e);
             }
         }
     }
+
+    private void initCastPlayer() {
+        castContext = CastContext.getSharedInstance();
+        currentCastSession = castContext.getSessionManager().getCurrentCastSession();
+
+        castPlayer = new CastPlayer(castContext);
+        currentPlayer = player;  // Keep local player as initial player
+
+        castPlayer.setRepeatMode(looping ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+        castPlayer.setPlayWhenReady(autoplay);
+
+        castPlayer.addListener(this);
+
+        castContext.addCastStateListener(castStateListener);
+        castContext.getSessionManager().addSessionManagerListener(sessionManagerListener, Session.class);
+    }
+
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
@@ -1491,17 +1502,29 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             title = currentUri.getLastPathSegment();
         }
         uri = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4";
-//        MediaItem mediaItem = builder.setUri(uri)
-//                .setMimeType("video/mp4")
-//                .setMediaId(uri)
-//                .setMediaMetadata(new MediaMetadata.Builder()
-//                        .setTitle(title)
-//                        .build())
-//                .build();
+        MediaItem mediaItem = builder.setUri(uri)
+            .setMimeType("video/mp4")
+            .setMediaId(uri)
+            .setMediaMetadata(new com.google.android.exoplayer2.MediaMetadata.Builder()
+                    .setTitle(title)
+                    .build())
+            .build();
 
         // Stop current playback
         if (currentPlayer != null) {
             currentPlayer.stop();
+            castPlayer.setMediaItem(mediaItem);
+        }
+
+        // Create JSON custom data to map back to MediaItem
+        JSONObject customData = new JSONObject();
+        try {
+            customData.put("uri", uri);
+            customData.put("mimeType", "video/mp4");
+            // Add any other necessary MediaItem properties
+            customData.put("mediaItem", true);  // Flag to identify our media items
+        } catch (JSONException e) {
+            FileLog.e("Error creating custom data", e);
         }
 
         MediaMetadata movieMetadata = new MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE);
@@ -1511,6 +1534,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
                 .setContentType("video/mp4")
                 .setMetadata(movieMetadata)
+                .setCustomData(customData)
                 .build();
 
         pendingLoadRequest = new MediaLoadRequestData.Builder()
@@ -1544,13 +1568,19 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     private void tryLoadMedia() {
         CastSession session = castContext.getSessionManager().getCurrentCastSession();
-        if (session == null) {
+        if (session == null || !session.isConnected()) {
+            waitingToPlay = true;
             return;
         }
-        if (castPlayer != null && session.isConnected()) {
+
+        if (castPlayer != null) {
+            waitingToPlay = false;
 //            RemoteMediaClient remoteMediaClient = castPlayer.getRemoteMediaClient();
+
             RemoteMediaClient remoteMediaClient = session.getRemoteMediaClient();
             if (remoteMediaClient != null) {
+                castPlayer.setRemoteMediaClient(remoteMediaClient);
+
                 remoteMediaClient.load(pendingLoadRequest)
                         .addStatusListener(status -> {
                            if(!status.isSuccess()) {
