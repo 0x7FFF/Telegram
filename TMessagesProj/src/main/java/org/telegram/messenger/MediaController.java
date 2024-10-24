@@ -66,7 +66,11 @@ import android.widget.FrameLayout;
 
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlayer;
+import com.google.android.exoplayer2.MediaItem;
+import com.google.android.exoplayer2.Player;
+import com.google.android.exoplayer2.ext.cast.CastPlayer;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
+import com.google.android.gms.cast.framework.CastContext;
 
 import org.telegram.messenger.audioinfo.AudioInfo;
 import org.telegram.messenger.video.MediaCodecVideoConvertor;
@@ -1126,6 +1130,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         }
     }
 
+    private CastContext castContext;
+    private CastPlayer castPlayer;
+    private boolean isCasting = false;
+
     private String[] mediaProjections;
 
     private static volatile MediaController Instance;
@@ -1274,6 +1282,17 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         } catch (Exception e) {
             FileLog.e(e);
         }
+
+        castContext = CastContext.getSharedInstance(ApplicationLoader.applicationContext);
+        castPlayer = new CastPlayer(castContext);
+        castPlayer.addListener(new Player.Listener() {
+            @Override
+            public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
+                if (playbackState == Player.STATE_ENDED) {
+                    playNextMessageWithoutOrder(true);
+                }
+            }
+        });
     }
 
     @Override
@@ -1846,57 +1865,9 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                         }
                     }
                 }
-                /*if (val > 0 && previousAccValue > 0) {
-                    if (val > minDist && raisedToBack == 0) {
-                        if (raisedToTop < minCount && !proximityTouched) {
-                            raisedToTop++;
-                            if (raisedToTop == minCount) {
-                                countLess = 0;
-                            }
-                        }
-                    } else {
-                        if (val < minDist) {
-                            countLess++;
-                        }
-                        if (countLess == countLessMax || raisedToTop != minCount || raisedToBack != 0) {
-                            raisedToBack = 0;
-                            raisedToTop = 0;
-                            countLess = 0;
-                        }
-                    }
-                } else if (val < 0 && previousAccValue < 0) {
-                    if (raisedToTop == minCount && val < -minDist) {
-                        if (raisedToBack < minCount) {
-                            raisedToBack++;
-                            if (raisedToBack == minCount) {
-                                raisedToTop = 0;
-                                countLess = 0;
-                                timeSinceRaise = System.currentTimeMillis();
-                                if (BuildVars.LOGS_ENABLED && BuildVars.DEBUG_PRIVATE_VERSION) {
-                                    FileLog.e("motion detected");
-                                }
-                            }
-                        }
-                    } else {
-                        if (val > -minDist) {
-                            countLess++;
-                        }
-                        if (countLess == countLessMax || raisedToTop != minCount || raisedToBack != 0) {
-                            raisedToTop = 0;
-                            raisedToBack = 0;
-                            countLess = 0;
-                        }
-                    }
-                }*/
-                /*if (BuildVars.LOGS_ENABLED && BuildVars.DEBUG_PRIVATE_VERSION) {
-                    FileLog.e("raise2 to top = " + raisedToTop + " to back = " + raisedToBack + " val = " + val + " countLess = " + countLess);
-                }*/
             }
             previousAccValue = val;
             accelerometerVertical = gravityFast[1] > 2.5f && Math.abs(gravityFast[2]) < 4.0f && Math.abs(gravityFast[0]) > 1.5f;
-            /*if (BuildVars.LOGS_ENABLED && BuildVars.DEBUG_PRIVATE_VERSION) {
-                FileLog.d(accelerometerVertical + "    val = " + val + " acc (" + linearAcceleration[0] + ", " + linearAcceleration[1] + ", " + linearAcceleration[2] + ") grav (" + gravityFast[0] + ", " + gravityFast[1] + ", " + gravityFast[2] + ")");
-            }*/
         }
         if (raisedToBack == minCount || accelerometerVertical) {
             lastAccelerometerDetected = System.currentTimeMillis();
@@ -1939,22 +1910,14 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                     if (useFrontSpeaker) {
                         setUseFrontSpeaker(true);
                     }
-//                    ignoreOnPause = true;
-//                    if (proximityHasDifferentValues && proximityWakeLock != null && !proximityWakeLock.isHeld()) {
-//                        proximityWakeLock.acquire();
-//                    }
                 }
             } else if (allowListening) {
                 if (!useFrontSpeaker) {
                     if (BuildVars.LOGS_ENABLED) {
                         FileLog.d("start listen");
                     }
-//                    if (proximityHasDifferentValues && proximityWakeLock != null && !proximityWakeLock.isHeld()) {
-//                        proximityWakeLock.acquire();
-//                    }
                     setUseFrontSpeaker(true);
                     startAudioAgain(false);
-//                    ignoreOnPause = true;
                 }
             }
             raisedToBack = 0;
@@ -1967,12 +1930,8 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                     if (BuildVars.LOGS_ENABLED) {
                         FileLog.d("start listen by proximity only");
                     }
-//                    if (proximityHasDifferentValues && proximityWakeLock != null && !proximityWakeLock.isHeld()) {
-//                        proximityWakeLock.acquire();
-//                    }
                     setUseFrontSpeaker(true);
                     startAudioAgain(false);
-//                    ignoreOnPause = true;
                 }
             }
         } else if (!proximityTouched && !manualRecording) {
@@ -1983,9 +1942,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 raiseToSpeakUpdated(false);
                 raiseToEarRecord = false;
                 ignoreOnPause = false;
-//                if (!ignoreAccelerometerGestures() && proximityHasDifferentValues && proximityWakeLock != null && proximityWakeLock.isHeld()) {
-//                    proximityWakeLock.release();
-//                }
             } else if (useFrontSpeaker) {
                 if (BuildVars.LOGS_ENABLED) {
                     FileLog.d("stop listen");
@@ -1993,9 +1949,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                 useFrontSpeaker = false;
                 startAudioAgain(true);
                 ignoreOnPause = false;
-//                if (!ignoreAccelerometerGestures() && proximityHasDifferentValues && proximityWakeLock != null && proximityWakeLock.isHeld()) {
-//                    proximityWakeLock.release();
-//                }
             }
         }
         if (timeSinceRaise != 0 && raisedToBack == minCount && Math.abs(System.currentTimeMillis() - timeSinceRaise) > 1000) {
@@ -2311,26 +2264,59 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         if (audioPlayer == null && videoPlayer == null || messageObject == null || playingMessageObject == null || !isSamePlayingMessage(messageObject)) {
             return false;
         }
-        try {
-            if (audioPlayer != null) {
-                long duration = audioPlayer.getDuration();
-                if (duration == C.TIME_UNSET) {
-                    seekToProgressPending = progress;
-                } else {
-                    playingMessageObject.audioProgress = progress;
-                    int seekTo = (int) (duration * progress);
-                    audioPlayer.seekTo(seekTo);
-                    lastProgress = seekTo;
+
+        if (isCasting) {
+            long duration = castPlayer.getDuration();
+            long seekTo = (long) (duration * progress);
+            castPlayer.seekTo(seekTo);
+        } else {
+            try {
+                if (audioPlayer != null) {
+                    long duration = audioPlayer.getDuration();
+                    if (duration == C.TIME_UNSET) {
+                        seekToProgressPending = progress;
+                    } else {
+                        playingMessageObject.audioProgress = progress;
+                        int seekTo = (int) (duration * progress);
+                        audioPlayer.seekTo(seekTo);
+                        lastProgress = seekTo;
+                    }
+                } else if (videoPlayer != null) {
+                    videoPlayer.seekTo((long) (videoPlayer.getDuration() * progress));
                 }
-            } else if (videoPlayer != null) {
-                videoPlayer.seekTo((long) (videoPlayer.getDuration() * progress));
+            } catch (Exception e) {
+                FileLog.e(e);
+                return false;
             }
-        } catch (Exception e) {
-            FileLog.e(e);
-            return false;
+            NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingDidSeek, playingMessageObject.getId(), progress);
         }
-        NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingDidSeek, playingMessageObject.getId(), progress);
         return true;
+    }
+
+    public void switchToCastPlayback() {
+        if (isCasting) {
+            return;
+        }
+        isCasting = true;
+        if (playingMessageObject != null) {
+            long position = audioPlayer.getCurrentPosition();
+            pauseMessage(playingMessageObject);
+            playCastMessage(playingMessageObject);
+            castPlayer.seekTo(position);
+        }
+    }
+
+    public void switchToLocalPlayback() {
+        if (!isCasting) {
+            return;
+        }
+        isCasting = false;
+        if (playingMessageObject != null) {
+            long position = castPlayer.getCurrentPosition();
+            castPlayer.stop();
+            playLocalMessage(playingMessageObject);
+            audioPlayer.seekTo(position);
+        }
     }
 
     public long getDuration() {
@@ -3097,26 +3083,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         }
         startProgressTimer(playingMessageObject);
         NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingDidStart, messageObject, oldMessageObject);
-
-        /*try {
-            if (playingMessageObject.audioProgress != 0) {
-                long duration = videoPlayer.getDuration();
-                if (duration == C.TIME_UNSET) {
-                    duration = (long) playingMessageObject.getDuration() * 1000;
-                }
-                int seekTo = (int) (duration * playingMessageObject.audioProgress);
-                if (playingMessageObject.audioProgressMs != 0) {
-                    seekTo = playingMessageObject.audioProgressMs;
-                    playingMessageObject.audioProgressMs = 0;
-                }
-                videoPlayer.seekTo(seekTo);
-            }
-        } catch (Exception e2) {
-            playingMessageObject.audioProgress = 0;
-            playingMessageObject.audioProgressSec = 0;
-            NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingProgressDidChanged, playingMessageObject.getId(), 0);
-            FileLog.e(e2);
-        }*/
     }
 
     public void playEmojiSound(AccountInstance accountInstance, String emoji, MessagesController.EmojiSound sound, boolean loadOnly) {
@@ -3255,7 +3221,26 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         if (messageObject == null) {
             return false;
         }
+
         isSilent = silent;
+
+        if (isCasting) {
+            return playCastMessage(messageObject);
+        } else {
+            return playLocalMessage(messageObject);
+        }
+    }
+
+    private boolean playCastMessage(MessageObject messageObject) {
+        Uri uri = Uri.parse(messageObject.getFileName());
+        MediaItem mediaItem = MediaItem.fromUri(uri);
+        castPlayer.setMediaItem(mediaItem);
+        castPlayer.prepare();
+        castPlayer.play();
+        return true;
+    }
+
+    private boolean playLocalMessage(MessageObject messageObject) {
         checkVolumeBarUI();
         if ((audioPlayer != null || videoPlayer != null) && isSamePlayingMessage(messageObject)) {
             if (isPaused) {
@@ -3304,11 +3289,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             if (canStartMusicPlayerService()) {
                 Intent intent = new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class);
                 try {
-                    /*if (Build.VERSION.SDK_INT >= 26) {
-                        ApplicationLoader.applicationContext.startForegroundService(intent);
-                    } else {*/
                     ApplicationLoader.applicationContext.startService(intent);
-                    //}
                 } catch (Throwable e) {
                     FileLog.e(e);
                 }
@@ -3338,7 +3319,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             int[] playCount = isVideo && messageObject.getDuration() <= 30 ? new int[]{1} : null;
             clearPlaylist();
             videoPlayer = new VideoPlayer();
-            videoPlayer.setLooping(silent);
+            videoPlayer.setLooping(isSilent);
             int tag = ++playerNum;
             videoPlayer.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
                 @Override
@@ -3651,7 +3632,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             startRaiseToEarSensors(raiseChat);
         }
         if (!ApplicationLoader.mainInterfacePaused && proximityWakeLock != null && !proximityWakeLock.isHeld() && (playingMessageObject.isVoice() || playingMessageObject.isRoundVideo()) && SharedConfig.enabledRaiseTo(false)) {
-//            proximityWakeLock.acquire();
         }
         startProgressTimer(playingMessageObject);
         NotificationCenter.getInstance(messageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingDidStart, messageObject, oldMessageObject);
@@ -3696,11 +3676,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         if (canStartMusicPlayerService()) {
             Intent intent = new Intent(ApplicationLoader.applicationContext, MusicPlayerService.class);
             try {
-                /*if (Build.VERSION.SDK_INT >= 26) {
-                    ApplicationLoader.applicationContext.startForegroundService(intent);
-                } else {*/
                 ApplicationLoader.applicationContext.startService(intent);
-                //}
             } catch (Throwable e) {
                 FileLog.e(e);
             }
@@ -3770,38 +3746,43 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         if (audioPlayer == null && videoPlayer == null || messageObject == null || playingMessageObject == null || !isSamePlayingMessage(messageObject)) {
             return false;
         }
-        stopProgressTimer();
-        try {
-            if (audioPlayer != null) {
-                if (!playingMessageObject.isVoice() && (playingMessageObject.getDuration() * (1f - playingMessageObject.audioProgress) > 1) && LaunchActivity.isResumed) {
-                    if (audioVolumeAnimator != null) {
-                        audioVolumeAnimator.removeAllUpdateListeners();
-                        audioVolumeAnimator.cancel();
-                    }
-                    audioVolumeAnimator = ValueAnimator.ofFloat(1f, 0);
-                    audioVolumeAnimator.addUpdateListener(audioVolumeUpdateListener);
-                    audioVolumeAnimator.setDuration(300);
-                    audioVolumeAnimator.addListener(new AnimatorListenerAdapter() {
-                        @Override
-                        public void onAnimationEnd(Animator animation) {
-                            if (audioPlayer != null) {
-                                audioPlayer.pause();
-                            }
+
+        if (isCasting) {
+            castPlayer.pause();
+        } else {
+            stopProgressTimer();
+            try {
+                if (audioPlayer != null) {
+                    if (!playingMessageObject.isVoice() && (playingMessageObject.getDuration() * (1f - playingMessageObject.audioProgress) > 1) && LaunchActivity.isResumed) {
+                        if (audioVolumeAnimator != null) {
+                            audioVolumeAnimator.removeAllUpdateListeners();
+                            audioVolumeAnimator.cancel();
                         }
-                    });
-                    audioVolumeAnimator.start();
-                } else {
-                    audioPlayer.pause();
+                        audioVolumeAnimator = ValueAnimator.ofFloat(1f, 0);
+                        audioVolumeAnimator.addUpdateListener(audioVolumeUpdateListener);
+                        audioVolumeAnimator.setDuration(300);
+                        audioVolumeAnimator.addListener(new AnimatorListenerAdapter() {
+                            @Override
+                            public void onAnimationEnd(Animator animation) {
+                                if (audioPlayer != null) {
+                                    audioPlayer.pause();
+                                }
+                            }
+                        });
+                        audioVolumeAnimator.start();
+                    } else {
+                        audioPlayer.pause();
+                    }
+                } else if (videoPlayer != null) {
+                    videoPlayer.pause();
                 }
-            } else if (videoPlayer != null) {
-                videoPlayer.pause();
+                isPaused = true;
+                NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
+            } catch (Exception e) {
+                FileLog.e(e);
+                isPaused = false;
+                return false;
             }
-            isPaused = true;
-            NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
-        } catch (Exception e) {
-            FileLog.e(e);
-            isPaused = false;
-            return false;
         }
         return true;
     }
@@ -3811,32 +3792,36 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             return false;
         }
 
-        try {
-            startProgressTimer(playingMessageObject);
-            if (audioVolumeAnimator != null) {
-                audioVolumeAnimator.removeAllListeners();
-                audioVolumeAnimator.cancel();
+        if (isCasting) {
+            castPlayer.pause();
+        } else {
+            try {
+                startProgressTimer(playingMessageObject);
+                if (audioVolumeAnimator != null) {
+                    audioVolumeAnimator.removeAllListeners();
+                    audioVolumeAnimator.cancel();
+                }
+                if (!messageObject.isVoice() && !messageObject.isRoundVideo()) {
+                    audioVolumeAnimator = ValueAnimator.ofFloat(audioVolume, 1f);
+                    audioVolumeAnimator.addUpdateListener(audioVolumeUpdateListener);
+                    audioVolumeAnimator.setDuration(300);
+                    audioVolumeAnimator.start();
+                } else {
+                    audioVolume = 1f;
+                    setPlayerVolume();
+                }
+                if (audioPlayer != null) {
+                    audioPlayer.play();
+                } else if (videoPlayer != null) {
+                    videoPlayer.play();
+                }
+                checkAudioFocus(messageObject);
+                isPaused = false;
+                NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
+            } catch (Exception e) {
+                FileLog.e(e);
+                return false;
             }
-            if (!messageObject.isVoice() && !messageObject.isRoundVideo()) {
-                audioVolumeAnimator = ValueAnimator.ofFloat(audioVolume, 1f);
-                audioVolumeAnimator.addUpdateListener(audioVolumeUpdateListener);
-                audioVolumeAnimator.setDuration(300);
-                audioVolumeAnimator.start();
-            } else {
-                audioVolume = 1f;
-                setPlayerVolume();
-            }
-            if (audioPlayer != null) {
-                audioPlayer.play();
-            } else if (videoPlayer != null) {
-                videoPlayer.play();
-            }
-            checkAudioFocus(messageObject);
-            isPaused = false;
-            NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
-        } catch (Exception e) {
-            FileLog.e(e);
-            return false;
         }
         return true;
     }

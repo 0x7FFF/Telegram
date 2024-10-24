@@ -133,6 +133,11 @@ import androidx.dynamicanimation.animation.DynamicAnimation;
 import androidx.dynamicanimation.animation.FloatValueHolder;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
+import androidx.mediarouter.app.MediaRouteButton;
+import androidx.mediarouter.app.MediaRouteChooserDialog;
+import androidx.mediarouter.app.MediaRouteControllerDialog;
+import androidx.mediarouter.media.MediaRouteSelector;
+import androidx.mediarouter.media.MediaRouter;
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.LinearSmoothScrollerEnd;
@@ -142,6 +147,11 @@ import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.analytics.AnalyticsListener;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
+import com.google.android.gms.cast.CastMediaControlIntent;
+import com.google.android.gms.cast.framework.CastButtonFactory;
+import com.google.android.gms.cast.framework.CastContext;
+import com.google.android.gms.cast.framework.CastState;
+import com.google.android.gms.cast.framework.CastStateListener;
 import com.google.android.gms.vision.Frame;
 import com.google.android.gms.vision.face.Face;
 import com.google.android.gms.vision.face.FaceDetector;
@@ -333,6 +343,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private TextSelectionHelper.SimpleTextSelectionHelper textSelectionHelper;
     private boolean firstFrameRendered;
     private Paint surfaceBlackoutPaint;
+    private MediaRouteButton mediaRouteButton;
+    private MediaRouter mediaRouter;
+    private MediaRouteSelector mediaRouteSelector;
 
     public TextureView getVideoTextureView() {
         return videoTextureView;
@@ -816,6 +829,20 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private ActionBarMenuItem editItem;
     private ActionBarMenuItem pipItem;
     private ActionBarMenuItem masksItem;
+    private ActionBarMenuItem castItem;
+    private CastContext castContext;
+    private final CastStateListener castStateListener = new CastStateListener() {
+        @Override
+        public void onCastStateChanged(int newState) {
+            if (castItem != null) {
+                if (newState != CastState.NO_DEVICES_AVAILABLE) {
+                    castItem.setVisibility(View.VISIBLE);
+                } else {
+                    castItem.setVisibility(View.GONE);
+                }
+            }
+        }
+    };
     private LinearLayout itemsLayout;
     private ChooseQualityLayout.QualityIcon qualityIcon;
     private ChooseSpeedLayout chooseSpeedLayout;
@@ -2007,6 +2034,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private final static int gallery_menu_translate = 21;
     private final static int gallery_menu_hide_translation = 22;
     private final static int gallery_menu_reply = 23;
+    private final static int gallery_menu_cast = 24;
 
     private final static int ads_sponsor_info = 101;
     private final static int ads_about = 102;
@@ -5453,6 +5481,23 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                         menuItem.hideSubItem(gallery_menu_hide_translation);
                     }, 32);
                     updateCaptionTranslated();
+                } else if (id == gallery_menu_cast) {
+                    if (mediaRouter == null || mediaRouteSelector == null) {
+                        return;
+                    }
+
+                    // Check if a route is already selected
+                    MediaRouter.RouteInfo selectedRoute = mediaRouter.getSelectedRoute();
+                    if (selectedRoute != null && !selectedRoute.isDefaultOrBluetooth()) {
+                        // A route is already selected; show the media controller dialog
+                        MediaRouteControllerDialog mediaRouteControllerDialog = new MediaRouteControllerDialog(parentActivity);
+                        mediaRouteControllerDialog.show();
+                    } else {
+                        // No route selected; show the media route chooser dialog
+                        MediaRouteChooserDialog mediaRouteChooserDialog = new MediaRouteChooserDialog(parentActivity);
+                        mediaRouteChooserDialog.setRouteSelector(mediaRouteSelector);
+                        mediaRouteChooserDialog.show();
+                    }
                 }
             }
 
@@ -5474,6 +5519,24 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         menu = actionBar.createMenu();
         menu.setOnLayoutListener(this::updateActionBarTitlePadding);
 
+        mediaRouter = MediaRouter.getInstance(parentActivity);
+        mediaRouteSelector = new MediaRouteSelector.Builder()
+                .addControlCategory(CastMediaControlIntent.categoryForCast(
+                        CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID))
+                .build();
+        castContext = CastContext.getSharedInstance(parentActivity);
+        castContext.addCastStateListener(castStateListener);
+
+        // Create the MediaRouteButton
+        mediaRouteButton = new MediaRouteButton(parentActivity);
+        CastButtonFactory.setUpMediaRouteButton(parentActivity, mediaRouteButton);
+        ActionBar.LayoutParams layoutParams = new ActionBar.LayoutParams(
+            ActionBar.LayoutParams.WRAP_CONTENT,
+            ActionBar.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER_VERTICAL
+        );
+        mediaRouteButton.setLayoutParams(layoutParams);
+
         masksItem = menu.addItem(gallery_menu_masks, R.drawable.msg_mask);
         masksItem.setContentDescription(getString("Masks", R.string.Masks));
         pipItem = menu.addItem(gallery_menu_pip, R.drawable.ic_goinline);
@@ -5482,6 +5545,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         editItem.setContentDescription(getString("AccDescrPhotoEditor", R.string.AccDescrPhotoEditor));
         sendItem = menu.addItem(gallery_menu_send, R.drawable.msg_header_share);
         sendItem.setContentDescription(getString("Forward", R.string.Forward));
+        castItem = menu.addItem(gallery_menu_cast, R.drawable.cast_ic_notification_small_icon);
 
         menuItem = menu.addItem(0, menuItemIcon = new OptionsSpeedIconDrawable());
         menuItem.setOnClickListener(v -> {

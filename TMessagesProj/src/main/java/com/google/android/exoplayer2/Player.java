@@ -1444,7 +1444,9 @@ public interface Player {
     COMMAND_GET_CURRENT_MEDIA_ITEM,
     COMMAND_GET_TIMELINE,
     COMMAND_GET_MEDIA_ITEMS_METADATA,
+    COMMAND_GET_METADATA,
     COMMAND_SET_MEDIA_ITEMS_METADATA,
+    COMMAND_SET_PLAYLIST_METADATA,
     COMMAND_SET_MEDIA_ITEM,
     COMMAND_CHANGE_MEDIA_ITEMS,
     COMMAND_GET_AUDIO_ATTRIBUTES,
@@ -1457,6 +1459,7 @@ public interface Player {
     COMMAND_GET_TEXT,
     COMMAND_SET_TRACK_SELECTION_PARAMETERS,
     COMMAND_GET_TRACKS,
+    COMMAND_RELEASE,
   })
   @interface Command {}
   /**
@@ -1655,6 +1658,11 @@ public interface Player {
   int COMMAND_GET_TIMELINE = 17;
 
   /**
+   * @deprecated Use {@link #COMMAND_GET_METADATA} instead.
+   */
+  @Deprecated int COMMAND_GET_MEDIA_ITEMS_METADATA = 18;
+
+  /**
    * Command to get metadata related to the playlist and current {@link MediaItem}.
    *
    * <p>The following methods must only be called if this command is {@linkplain
@@ -1665,8 +1673,12 @@ public interface Player {
    *   <li>{@link #getPlaylistMetadata()}
    * </ul>
    */
-  // TODO(b/263132691): Rename this to COMMAND_GET_METADATA
-  int COMMAND_GET_MEDIA_ITEMS_METADATA = 18;
+  int COMMAND_GET_METADATA = 18;
+
+  /**
+   * @deprecated Use {@link #COMMAND_SET_PLAYLIST_METADATA} instead.
+   */
+  @Deprecated int COMMAND_SET_MEDIA_ITEMS_METADATA = 19;
 
   /**
    * Command to set the playlist metadata.
@@ -1674,8 +1686,7 @@ public interface Player {
    * <p>The {@link #setPlaylistMetadata(MediaMetadata)} method must only be called if this command
    * is {@linkplain #isCommandAvailable(int) available}.
    */
-  // TODO(b/263132691): Rename this to COMMAND_SET_PLAYLIST_METADATA
-  int COMMAND_SET_MEDIA_ITEMS_METADATA = 19;
+  int COMMAND_SET_PLAYLIST_METADATA = 19;
 
   /**
    * Command to set a {@link MediaItem}.
@@ -1709,6 +1720,8 @@ public interface Player {
    *   <li>{@link #setMediaItems(List)}
    *   <li>{@link #setMediaItems(List, boolean)}
    *   <li>{@link #setMediaItems(List, int, long)}
+   *   <li>{@link #replaceMediaItem(int, MediaItem)}
+   *   <li>{@link #replaceMediaItems(int, int, List)}
    * </ul>
    */
   int COMMAND_CHANGE_MEDIA_ITEMS = 20;
@@ -1812,6 +1825,15 @@ public interface Player {
    * #isCommandAvailable(int) available}.
    */
   int COMMAND_GET_TRACKS = 30;
+
+  /**
+   * Command to release the player.
+   *
+   * <p>The {@link #release()} method must only be called if this command is {@linkplain
+   * #isCommandAvailable(int) available}.
+   */
+  int COMMAND_RELEASE = 32;
+
 
   /** Represents an invalid {@link Command}. */
   int COMMAND_INVALID = -1;
@@ -1993,6 +2015,37 @@ public interface Player {
    *     end of the playlist.
    */
   void moveMediaItems(int fromIndex, int toIndex, int newIndex);
+
+  /**
+   * Replaces the media item at the given index of the playlist.
+   *
+   * <p>This method must only be called if {@link #COMMAND_CHANGE_MEDIA_ITEMS} is {@linkplain
+   * #getAvailableCommands() available}.
+   *
+   * @param index The index at which to replace the media item. If the index is larger than the size
+   *     of the playlist, the request is ignored.
+   * @param mediaItem The new {@link MediaItem}.
+   */
+  void replaceMediaItem(int index, MediaItem mediaItem);
+
+  /**
+   * Replaces the media items at the given range of the playlist.
+   *
+   * <p>This method must only be called if {@link #COMMAND_CHANGE_MEDIA_ITEMS} is {@linkplain
+   * #getAvailableCommands() available}.
+   *
+   * <p>Note that it is possible to replace a range with an arbitrary number of new items, so that
+   * the number of removed items defined by {@code fromIndex} and {@code toIndex} does not have to
+   * match the number of added items defined by {@code mediaItems}. As result, it may also change
+   * the index of subsequent items not touched by this operation.
+   *
+   * @param fromIndex The start of the range. If the index is larger than the size of the playlist,
+   *     the request is ignored.
+   * @param toIndex The first item not to be included in the range (exclusive). If the index is
+   *     larger than the size of the playlist, items up to the end of the playlist are replaced.
+   * @param mediaItems The {@linkplain MediaItem media items} to replace the range with.
+   */
+  void replaceMediaItems(int fromIndex, int toIndex, List<MediaItem> mediaItems);
 
   /**
    * Removes the media item at the given index of the playlist.

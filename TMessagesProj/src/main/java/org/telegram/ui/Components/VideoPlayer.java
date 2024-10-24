@@ -40,6 +40,7 @@ import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.MediaItem;
+//import com.google.android.exoplayer2.MediaMetadata;
 import com.google.android.exoplayer2.PlaybackException;
 import com.google.android.exoplayer2.PlaybackParameters;
 import com.google.android.exoplayer2.Player;
@@ -51,6 +52,7 @@ import com.google.android.exoplayer2.audio.AudioProcessor;
 import com.google.android.exoplayer2.audio.AudioSink;
 import com.google.android.exoplayer2.audio.DefaultAudioSink;
 import com.google.android.exoplayer2.audio.TeeAudioProcessor;
+import com.google.android.exoplayer2.ext.cast.CastPlayer;
 import com.google.android.exoplayer2.mediacodec.MediaCodecRenderer;
 import com.google.android.exoplayer2.mediacodec.MediaCodecUtil;
 import com.google.android.exoplayer2.source.LoopingMediaSource;
@@ -68,9 +70,21 @@ import com.google.android.exoplayer2.trackselection.TrackSelectionOverride;
 import com.google.android.exoplayer2.trackselection.TrackSelectionParameters;
 import com.google.android.exoplayer2.upstream.DefaultAllocator;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
+import com.google.android.exoplayer2.util.Log;
 import com.google.android.exoplayer2.video.SurfaceNotValidException;
 import com.google.android.exoplayer2.video.VideoListener;
 import com.google.android.exoplayer2.video.VideoSize;
+import com.google.android.gms.cast.MediaInfo;
+import com.google.android.gms.cast.MediaMetadata;
+import com.google.android.gms.cast.MediaLoadRequestData;
+import com.google.android.gms.cast.framework.CastContext;
+import com.google.android.gms.cast.framework.CastState;
+import com.google.android.gms.cast.framework.CastStateListener;
+import com.google.android.gms.cast.framework.Session;
+import com.google.android.gms.cast.framework.SessionManagerListener;
+import com.google.android.gms.cast.framework.media.RemoteMediaClient;
+import com.google.android.gms.common.api.PendingResult;
+import com.google.android.gms.common.api.Status;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -124,6 +138,10 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         default void onSeekFinished(AnalyticsListener.EventTime eventTime) {
 
         }
+
+        default void onCastStateChanged(int newState) {
+            // TODO: Implement
+        }
     }
 
     public interface AudioVisualizerDelegate {
@@ -131,8 +149,36 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         boolean needUpdate();
     }
 
+    private final CastStateListener castStateListener = newState -> updateCastState(newState);
+
+    private final SessionManagerListener<Session> sessionManagerListener = new SessionManagerListener<Session>() {
+        @Override
+        public void onSessionStarted(Session session, String sessionId) {
+            setCurrentPlayer(castPlayer);
+        }
+
+        @Override
+        public void onSessionEnded(Session session, int error) {
+            setCurrentPlayer(player);
+        }
+
+        // Implement other methods if necessary
+        @Override public void onSessionStarting(Session session) {}
+        @Override public void onSessionStartFailed(Session session, int error) {}
+        @Override public void onSessionEnding(Session session) {}
+        @Override public void onSessionResumed(Session session, boolean wasSuspended) {}
+        @Override public void onSessionResumeFailed(Session session, int error) {}
+        @Override public void onSessionSuspended(Session session, int reason) {}
+        @Override public void onSessionResuming(Session session, String sessionId) {}
+    };
+
+    private Player currentPlayer;
     public ExoPlayer player;
     private ExoPlayer audioPlayer;
+    private CastPlayer castPlayer;
+    private CastContext castContext;
+    private boolean waitingToPlay = false;
+    private MediaLoadRequestData pendingLoadRequest = null;
     private DefaultBandwidthMeter bandwidthMeter;
     private MappingTrackSelector trackSelector;
     private ExtendedDefaultDataSourceFactory mediaDataSourceFactory;
@@ -193,7 +239,22 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         if (pauseOther) {
             NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.playerDidStartPlaying);
         }
-        playerCounter++;
+
+        //Crash on stories
+        if (!isStory) {
+            try {
+                castContext = CastContext.getSharedInstance();
+                castPlayer = new CastPlayer(castContext);
+                currentPlayer = player;
+                castContext.addCastStateListener(castStateListener);
+                castContext.getSessionManager().addSessionManagerListener(sessionManagerListener, Session.class);
+                castPlayer.setRepeatMode(looping ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+                castPlayer.addListener(this);
+                castPlayer.setPlayWhenReady(autoplay);
+            } catch (Exception e) {
+                FileLog.e("Cast initialization failed", e);
+            }
+        }
     }
 
     @Override
@@ -362,10 +423,96 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         String scheme = uri != null ? uri.getScheme() : null;
         isStreaming = scheme != null && !scheme.startsWith("file");
         ensurePlayerCreated();
-        MediaSource mediaSource = mediaSourceFromUri(uri, type);
-        player.setMediaSource(mediaSource, true);
-        player.prepare();
+//        MediaSource mediaSource = mediaSourceFromUri(uri, type);
+//        player.setMediaSource(mediaSource, true);
+//        player.prepare();
+
+        MediaItem mediaItem = new MediaItem.Builder()
+                .setUri(uri)
+                .setMimeType(getMimeType(type))
+                .setMediaMetadata(new com.google.android.exoplayer2.MediaMetadata.Builder()
+                        .setTitle(getMediaTitle(uri))
+                        .build())
+                .build();
+        // If casting, use CastPlayer
+        if (isCasting() && castPlayer != null) {
+            // Stop local player if playing
+            if (player != null && player.isPlaying()) {
+                player.stop();
+            }
+
+            castPlayer.setMediaItem(mediaItem);
+            castPlayer.prepare();
+            currentPlayer = castPlayer;
+        } else if (player != null) {
+            // For local player, use MediaSource
+            MediaSource mediaSource = mediaSourceFromUri(uri, type);
+            player.setMediaSource(mediaSource, true);
+            player.prepare();
+            currentPlayer = player;
+        }
     }
+
+    private String getMediaTitle(Uri uri) {
+        if (uri == null) return "";
+        String lastSegment = uri.getLastPathSegment();
+        if (lastSegment != null) {
+            // Clean up filename for display
+            return lastSegment.replaceAll("\\d+_", "")
+                    .replaceAll("\\.\\w+$", "");
+        }
+        return "";
+    }
+
+    private String getMimeType(String type) {
+        switch (type) {
+            case "dash":
+                return "application/dash+xml";
+            case "hls":
+                return "application/x-mpegURL";
+            case "ss":
+                return "application/vnd.ms-sstr+xml";
+            default:
+                return "video/mp4";
+        }
+    }
+
+    private String getDirectUrl(Uri uri) {
+        try {
+            if (uri.getScheme() != null && uri.getScheme().equals("tg")) {
+                // Parse the parameters from the tg:// URI
+                String query = uri.getEncodedQuery();
+                if (query == null) return null;
+
+                // Extract necessary parameters
+                int dc = -1;
+                long id = -1;
+                String hash = null;
+
+                for (String param : query.split("&")) {
+                    String[] pair = param.split("=");
+                    if (pair.length == 2) {
+                        if (pair[0].equals("id")) {
+                            id = Long.parseLong(pair[1]);
+                        } else if (pair[0].equals("dc")) {
+                            dc = Integer.parseInt(pair[1]);
+                        } else if (pair[0].equals("hash")) {
+                            hash = pair[1];
+                        }
+                    }
+                }
+
+                if (dc != -1 && id != -1) {
+                    // Construct CDN URL
+                    return String.format("https://cdn%d.telegram-cdn.org/file/%d?hash=%s", dc, id, hash);
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e("Error getting direct URL", e);
+        }
+        return null;
+    }
+
 
     public void preparePlayer(ArrayList<Quality> uris, Quality select) {
         this.videoQualities = uris;
@@ -974,9 +1121,10 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public boolean isPlayerPrepared() {
-        return player != null;
+        return currentPlayer != null;
     }
 
+    // When pressed back it should release
     public void releasePlayer(boolean async) {
         if (player != null) {
             player.release();
@@ -988,6 +1136,14 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         }
         if (shouldPauseOther) {
             NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.playerDidStartPlaying);
+        }
+        if (castPlayer != null) {
+            castPlayer.release();
+            castPlayer = null;
+        }
+        if (castContext != null) {
+            castContext.getSessionManager().removeSessionManagerListener(sessionManagerListener, Session.class);
+            castContext.removeCastStateListener(castStateListener);
         }
         playerCounter--;
     }
@@ -1012,6 +1168,19 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         fallbackDuration = C.TIME_UNSET;
         if (delegate != null) {
             delegate.onRenderedFirstFrame(eventTime);
+        }
+    }
+
+    private int cstate = -1;
+    private void updateCastState(int newState) {
+        cstate = newState;
+        if (newState != CastState.NO_DEVICES_AVAILABLE) {
+            setCurrentPlayer(castPlayer);
+        } else {
+            setCurrentPlayer(player);
+        }
+        if (delegate != null) {
+            delegate.onCastStateChanged(newState);
         }
     }
 
@@ -1060,6 +1229,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         return currentUri;
     }
 
+
     public void play() {
         mixedPlayWhenReady = true;
         if (mixedAudio) {
@@ -1073,9 +1243,14 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 return;
             }
         }
-        if (player != null) {
-            player.setPlayWhenReady(true);
+
+        if (currentPlayer != null) {
+            currentPlayer.setPlayWhenReady(true);
+            if (currentPlayer == castPlayer) {
+                currentPlayer.prepare();
+            }
         }
+
         if (audioPlayer != null) {
             audioPlayer.setPlayWhenReady(true);
         }
@@ -1083,8 +1258,8 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     public void pause() {
         mixedPlayWhenReady = false;
-        if (player != null) {
-            player.setPlayWhenReady(false);
+        if (currentPlayer != null) {
+            currentPlayer.setPlayWhenReady(false);
         }
         if (audioPlayer != null) {
             audioPlayer.setPlayWhenReady(false);
@@ -1128,23 +1303,23 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         if (fallbackDuration != C.TIME_UNSET) {
             return fallbackDuration;
         }
-        return player != null ? player.getDuration() : 0;
+        return currentPlayer != null ? currentPlayer.getDuration() : 0;
     }
 
     public long getCurrentPosition() {
         if (fallbackPosition != C.TIME_UNSET) {
             return fallbackPosition;
         }
-        return player != null ? player.getCurrentPosition() : 0;
+        return currentPlayer != null ? currentPlayer.getCurrentPosition() : 0;
     }
 
     public boolean isMuted() {
-        return player != null && player.getVolume() == 0.0f;
+        return currentPlayer != null && currentPlayer.getVolume() == 0.0f;
     }
 
     public void setMute(boolean value) {
-        if (player != null) {
-            player.setVolume(value ? 0.0f : 1.0f);
+        if (currentPlayer != null) {
+            currentPlayer.setVolume(value ? 0.0f : 1.0f);
         }
         if (audioPlayer != null) {
             audioPlayer.setVolume(value ? 0.0f : 1.0f);
@@ -1190,11 +1365,11 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public int getBufferedPercentage() {
-        return isStreaming ? (player != null ? player.getBufferedPercentage() : 0) : 100;
+        return isStreaming ? (player != null ? currentPlayer.getBufferedPercentage() : 0) : 100;
     }
 
     public long getBufferedPosition() {
-        return player != null ? (isStreaming ? player.getBufferedPosition() : player.getDuration()) : 0;
+        return player != null ? (isStreaming ? currentPlayer.getBufferedPosition() : currentPlayer.getDuration()) : 0;
     }
 
     public boolean isStreaming() {
@@ -1202,7 +1377,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public boolean isPlaying() {
-        return mixedAudio && mixedPlayWhenReady || player != null && player.getPlayWhenReady();
+        return mixedAudio && mixedPlayWhenReady || currentPlayer != null && currentPlayer.getPlayWhenReady();
     }
 
     public boolean isBuffering() {
@@ -1264,6 +1439,106 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             audioUpdateHandler.removeCallbacksAndMessages(null);
             if (audioVisualizerDelegate != null) {
                 audioVisualizerDelegate.onVisualizerUpdate(false, true, null);
+            }
+        }
+    }
+
+    public boolean isCasting() {
+        return currentPlayer == castPlayer;
+    }
+
+    private void setCurrentPlayer(Player newPlayer) {
+        if (currentPlayer == newPlayer || newPlayer == null) {
+            return;
+        }
+
+        // Store state from old player
+        long position = currentPlayer != null ? currentPlayer.getCurrentPosition() : 0;
+        boolean playWhenReady = currentPlayer != null && currentPlayer.getPlayWhenReady();
+
+        // Create MediaItem once for both cases
+        MediaItem.Builder builder = new MediaItem.Builder();
+        String uri = "";
+        String title = "";
+        if (currentStreamIsHls) {
+            int idx = getCurrentQualityIndex();
+            Uri g = videoQualities.get(idx).uris.get(0).uri;
+            uri = getDirectUrl(g);
+            title = "hls";
+        }
+        else if (currentUri != null) {
+            uri = currentUri.toString();
+            title = currentUri.getLastPathSegment();
+        }
+        uri = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4";
+//        MediaItem mediaItem = builder.setUri(uri)
+//                .setMimeType("video/mp4")
+//                .setMediaId(uri)
+//                .setMediaMetadata(new MediaMetadata.Builder()
+//                        .setTitle(title)
+//                        .build())
+//                .build();
+
+        // Stop current playback
+        if (currentPlayer != null) {
+            currentPlayer.stop();
+        }
+
+        MediaMetadata movieMetadata = new MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE);
+        movieMetadata.putString(MediaMetadata.KEY_TITLE, "Video");
+
+        MediaInfo mediaInfo = new MediaInfo.Builder(uri)
+                .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
+                .setContentType("video/mp4")
+                .setMetadata(movieMetadata)
+                .build();
+
+        if (newPlayer == castPlayer) {
+            MediaLoadRequestData requestData = new MediaLoadRequestData.Builder()
+                    .setMediaInfo(mediaInfo)
+                    .setAutoplay(playWhenReady)
+                    .setCurrentTime(position / 1000L)  // Convert to seconds
+                    .build();
+
+            // Load into cast player
+            if (castPlayer != null && castPlayer.isCastSessionAvailable()) {
+                RemoteMediaClient remoteMediaClient = castPlayer.getRemoteMediaClient();
+                if (remoteMediaClient != null) {
+                    Log.d("PIZDEC", "remoteMediaClient is not null, cast state:" + cstate);
+                    remoteMediaClient.load(requestData);
+                }
+            }
+//            castPlayer.setMediaItem(mediaItem);
+//            castPlayer.prepare();
+//            castPlayer.seekTo(position);
+//            castPlayer.setPlayWhenReady(playWhenReady);
+        } else if (newPlayer == player) {
+            MediaSource mediaSource = mediaSourceFromUri(currentUri, videoType);
+            player.setMediaSource(mediaSource, true);
+            player.prepare();
+            player.seekTo(position);
+            player.setPlayWhenReady(playWhenReady);
+        }
+        currentPlayer = player;
+    }
+
+    private void tryLoadMedia() {
+        if (pendingLoadRequest == null) return;
+
+        if (castPlayer != null && castPlayer.isCastSessionAvailable()) {
+            RemoteMediaClient remoteMediaClient = castPlayer.getRemoteMediaClient();
+            if (remoteMediaClient != null) {
+                remoteMediaClient.load(pendingLoadRequest)
+                        .addStatusListener(status -> {
+                           if(!status.isSuccess()) {
+                               new Handler(Looper.getMainLooper()).postDelayed(this::tryLoadMedia, 1000);
+                           } else {
+                               pendingLoadRequest = null;
+                           }
+                        });
+            } else {
+                // RemoteMediaClient not ready yet, wait for session callback
+                waitingToPlay = true;
             }
         }
     }

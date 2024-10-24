@@ -34,6 +34,7 @@ import android.view.ViewGroup;
 import androidx.annotation.NonNull;
 import androidx.multidex.MultiDex;
 
+import com.google.android.gms.cast.framework.CastContext;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesUtil;
 
@@ -51,6 +52,7 @@ import org.telegram.ui.LauncherIconController;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.concurrent.Executors;
 
 public class ApplicationLoader extends Application {
 
@@ -264,6 +266,8 @@ public class ApplicationLoader extends Application {
         }
 
         super.onCreate();
+
+        CastContext.getSharedInstance(this, Executors.newSingleThreadExecutor());
 
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("app start time = " + (startTime = SystemClock.elapsedRealtime()));
