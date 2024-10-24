@@ -838,7 +838,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 if (newState != CastState.NO_DEVICES_AVAILABLE) {
                     castItem.setVisibility(View.VISIBLE);
                 } else {
-                    castItem.setVisibility(View.GONE);
+//                    castItem.setVisibility(View.GONE);
                 }
             }
         }

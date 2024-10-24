@@ -1234,7 +1234,7 @@ public final class CastPlayer extends BasePlayer {
         }
     }
 
-    private void setRemoteMediaClient(@Nullable RemoteMediaClient remoteMediaClient) {
+    public void setRemoteMediaClient(@Nullable RemoteMediaClient remoteMediaClient) {
         if (this.remoteMediaClient == remoteMediaClient) {
             // Do nothing.
             return;

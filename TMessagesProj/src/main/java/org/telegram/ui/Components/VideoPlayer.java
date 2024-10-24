@@ -78,6 +78,7 @@ import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaMetadata;
 import com.google.android.gms.cast.MediaLoadRequestData;
 import com.google.android.gms.cast.framework.CastContext;
+import com.google.android.gms.cast.framework.CastSession;
 import com.google.android.gms.cast.framework.CastState;
 import com.google.android.gms.cast.framework.CastStateListener;
 import com.google.android.gms.cast.framework.Session;
@@ -155,18 +156,35 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         @Override
         public void onSessionStarted(Session session, String sessionId) {
             setCurrentPlayer(castPlayer);
+            if (waitingToPlay) {
+                waitingToPlay = false;
+                // Wait a moment for RemoteMediaClient to be fully initialized
+                new Handler(Looper.getMainLooper()).postDelayed(loadingRequestRunnable, 1000);
+            }
+        }
+
+        @Override
+        public void onSessionResumed(Session session, boolean wasSuspended) {
+            setCurrentPlayer(castPlayer);
+            if (waitingToPlay) {
+                waitingToPlay = false;
+                // Wait a moment for RemoteMediaClient to be fully initialized
+                new Handler(Looper.getMainLooper()).postDelayed(loadingRequestRunnable, 1000);
+            }
         }
 
         @Override
         public void onSessionEnded(Session session, int error) {
             setCurrentPlayer(player);
+            // Clear any pending requests
+            pendingLoadRequest = null;
+            waitingToPlay = false;
         }
 
         // Implement other methods if necessary
         @Override public void onSessionStarting(Session session) {}
         @Override public void onSessionStartFailed(Session session, int error) {}
         @Override public void onSessionEnding(Session session) {}
-        @Override public void onSessionResumed(Session session, boolean wasSuspended) {}
         @Override public void onSessionResumeFailed(Session session, int error) {}
         @Override public void onSessionSuspended(Session session, int reason) {}
         @Override public void onSessionResuming(Session session, String sessionId) {}
@@ -177,8 +195,10 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     private ExoPlayer audioPlayer;
     private CastPlayer castPlayer;
     private CastContext castContext;
+    private CastSession currentCastSession;
     private boolean waitingToPlay = false;
     private MediaLoadRequestData pendingLoadRequest = null;
+    private Runnable loadingRequestRunnable = this::tryLoadMedia;
     private DefaultBandwidthMeter bandwidthMeter;
     private MappingTrackSelector trackSelector;
     private ExtendedDefaultDataSourceFactory mediaDataSourceFactory;
@@ -244,6 +264,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         if (!isStory) {
             try {
                 castContext = CastContext.getSharedInstance();
+                currentCastSession = castContext.getSessionManager().getCurrentCastSession();
                 castPlayer = new CastPlayer(castContext);
                 currentPlayer = player;
                 castContext.addCastStateListener(castStateListener);
@@ -1124,7 +1145,6 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         return currentPlayer != null;
     }
 
-    // When pressed back it should release
     public void releasePlayer(boolean async) {
         if (player != null) {
             player.release();
@@ -1493,6 +1513,12 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 .setMetadata(movieMetadata)
                 .build();
 
+        pendingLoadRequest = new MediaLoadRequestData.Builder()
+                .setMediaInfo(mediaInfo)
+                .setAutoplay(playWhenReady)
+                .setCurrentTime(position / 1000L)
+                .build();
+
         if (newPlayer == castPlayer) {
             MediaLoadRequestData requestData = new MediaLoadRequestData.Builder()
                     .setMediaInfo(mediaInfo)
@@ -1501,13 +1527,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                     .build();
 
             // Load into cast player
-            if (castPlayer != null && castPlayer.isCastSessionAvailable()) {
-                RemoteMediaClient remoteMediaClient = castPlayer.getRemoteMediaClient();
-                if (remoteMediaClient != null) {
-                    Log.d("PIZDEC", "remoteMediaClient is not null, cast state:" + cstate);
-                    remoteMediaClient.load(requestData);
-                }
-            }
+                tryLoadMedia();
 //            castPlayer.setMediaItem(mediaItem);
 //            castPlayer.prepare();
 //            castPlayer.seekTo(position);
@@ -1523,15 +1543,18 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     private void tryLoadMedia() {
-        if (pendingLoadRequest == null) return;
-
-        if (castPlayer != null && castPlayer.isCastSessionAvailable()) {
-            RemoteMediaClient remoteMediaClient = castPlayer.getRemoteMediaClient();
+        CastSession session = castContext.getSessionManager().getCurrentCastSession();
+        if (session == null) {
+            return;
+        }
+        if (castPlayer != null && session.isConnected()) {
+//            RemoteMediaClient remoteMediaClient = castPlayer.getRemoteMediaClient();
+            RemoteMediaClient remoteMediaClient = session.getRemoteMediaClient();
             if (remoteMediaClient != null) {
                 remoteMediaClient.load(pendingLoadRequest)
                         .addStatusListener(status -> {
                            if(!status.isSuccess()) {
-                               new Handler(Looper.getMainLooper()).postDelayed(this::tryLoadMedia, 1000);
+                               new Handler(Looper.getMainLooper()).postDelayed(loadingRequestRunnable, 1000);
                            } else {
                                pendingLoadRequest = null;
                            }
