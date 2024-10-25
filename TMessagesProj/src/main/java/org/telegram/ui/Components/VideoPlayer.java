@@ -12,8 +12,12 @@ import static org.telegram.messenger.LocaleController.getString;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.graphics.SurfaceTexture;
 import android.media.AudioManager;
 import android.media.MediaCodecInfo;
@@ -21,8 +25,10 @@ import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.util.Base64;
 import android.util.LongSparseArray;
@@ -40,7 +46,6 @@ import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.MediaItem;
-//import com.google.android.exoplayer2.MediaMetadata;
 import com.google.android.exoplayer2.PlaybackException;
 import com.google.android.exoplayer2.PlaybackParameters;
 import com.google.android.exoplayer2.Player;
@@ -101,11 +106,18 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.castserver.webserver.SimpleWebServer;
+import org.telegram.messenger.castserver.webserver.WebServerUtil;
 import org.telegram.messenger.secretmedia.ExtendedDefaultDataSourceFactory;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.PhotoViewer;
 import org.telegram.ui.Stories.recorder.StoryEntry;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.ByteBuffer;
@@ -161,7 +173,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             if (waitingToPlay) {
                 waitingToPlay = false;
                 // Wait a moment for RemoteMediaClient to be fully initialized
-                new Handler(Looper.getMainLooper()).postDelayed(loadingRequestRunnable, 1000);
+                new Handler(Looper.getMainLooper()).postDelayed(loadingRequestRunnable, 500);
             }
         }
 
@@ -171,7 +183,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             if (waitingToPlay) {
                 waitingToPlay = false;
                 // Wait a moment for RemoteMediaClient to be fully initialized
-                new Handler(Looper.getMainLooper()).postDelayed(loadingRequestRunnable, 1000);
+                new Handler(Looper.getMainLooper()).postDelayed(loadingRequestRunnable, 500);
             }
         }
 
@@ -1498,10 +1510,10 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             title = "hls";
         }
         else if (currentUri != null) {
-            uri = currentUri.toString();
+            uri = getLocalUrlForVideo(currentUri);
             title = currentUri.getLastPathSegment();
         }
-        uri = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4";
+//        uri = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4";
         MediaItem mediaItem = builder.setUri(uri)
             .setMimeType("video/mp4")
             .setMediaId(uri)
@@ -1575,7 +1587,6 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
         if (castPlayer != null) {
             waitingToPlay = false;
-//            RemoteMediaClient remoteMediaClient = castPlayer.getRemoteMediaClient();
 
             RemoteMediaClient remoteMediaClient = session.getRemoteMediaClient();
             if (remoteMediaClient != null) {
@@ -1593,6 +1604,95 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 // RemoteMediaClient not ready yet, wait for session callback
                 waitingToPlay = true;
             }
+        }
+    }
+
+    private String getLocalUrlForVideo(Uri uri) {
+        try {
+            String host = PhotoViewer.getInstance().deviceIp;
+            if (uri == null || uri.getScheme() == null || host == null) {
+                return null;
+            }
+
+            // Start local server if not already running
+//            SimpleWebServer.init(parentActivity, true);
+
+            // Get source file path
+            String sourcePath = uri.getPath();
+            if (sourcePath == null) {
+                return null;
+            }
+            File sourceFile = new File(sourcePath);
+            String fileName = sourceFile.getName();
+
+            // Get or create video file using MediaStore
+            ContentResolver resolver = ApplicationLoader.applicationContext.getContentResolver();
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4");
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, "Movies/Telegram");
+
+            Uri targetUri = null;
+            // First try to find existing file
+            String selection = MediaStore.MediaColumns.RELATIVE_PATH + "=? AND " +
+                    MediaStore.MediaColumns.DISPLAY_NAME + "=?";
+            String[] selectionArgs = new String[]{"Telegram/Telegram Video", fileName};
+            try (Cursor cursor = resolver.query(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    null,
+                    selection,
+                    selectionArgs,
+                    null
+            )) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int idColumn = cursor.getColumnIndex(MediaStore.MediaColumns._ID);
+                    if (idColumn >= 0) {
+                        long id = cursor.getLong(idColumn);
+                        targetUri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id);
+                    }
+                }
+            }
+
+            // If file doesn't exist, create it
+            if (targetUri == null) {
+                targetUri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
+            }
+
+            if (targetUri == null) {
+                return null;
+            }
+
+            // Copy the file
+            try (InputStream is = new FileInputStream(sourceFile);
+                 OutputStream os = resolver.openOutputStream(targetUri, "wt")) {
+                if (os == null) {
+                    return null;
+                }
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = is.read(buffer)) != -1) {
+                    os.write(buffer, 0, read);
+                }
+                os.flush();
+            } catch (Exception e) {
+                FileLog.e(e);
+                return null;
+            }
+
+            // Get the actual file path
+            try (Cursor cursor = resolver.query(targetUri, new String[]{MediaStore.MediaColumns.DATA}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    String filePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA));
+                    if (filePath != null) {
+                        return "http://" + host + ":8080/Movies/Telegram/" + Uri.encode(fileName);
+                    }
+                }
+            }
+
+            return null;
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
         }
     }
 
