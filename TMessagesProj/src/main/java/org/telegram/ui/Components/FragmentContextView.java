@@ -523,7 +523,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             SharedPreferences preferences = MessagesController.getGlobalMainSettings();
             preferences.edit().putBoolean("notify_me_pressed_" + callId, true).apply();
 
-            BulletinFactory.of(fragment).createSimpleBulletin(ContextCompat.getDrawable(context, R.drawable.input_notify_on),LocaleController.getString(R.string.YouWillBeNotifiedWhenStreamStarts)).show();
+            BulletinFactory.of(fragment).createSimpleBulletin(R.raw.silent_unmute,LocaleController.getString(R.string.YouWillBeNotifiedWhenStreamStarts)).show();
 
             scheduleRunnableScheduled = false;
             updateScheduleTimeRunnable.run();
