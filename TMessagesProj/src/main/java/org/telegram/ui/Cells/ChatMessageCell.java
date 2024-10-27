@@ -172,6 +172,7 @@ import org.telegram.ui.Components.RoundVideoPlayingDrawable;
 import org.telegram.ui.Components.SeekBar;
 import org.telegram.ui.Components.SeekBarAccessibilityDelegate;
 import org.telegram.ui.Components.SeekBarWaveform;
+import org.telegram.ui.Components.ShareReactionLayout;
 import org.telegram.ui.Components.SizeNotifierFrameLayout;
 import org.telegram.ui.Components.SlotsDrawable;
 import org.telegram.ui.Components.StaticLayoutEx;
@@ -1277,6 +1278,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     private boolean isMedia;
     private boolean isCheckPressed = true;
     private boolean wasLayout;
+    private boolean wasLongPressed;
+    private ShareReactionLayout currentShareLayout;
+    private Runnable onShareDismissCallback;
     public boolean isAvatarVisible;
     private boolean isThreadPost;
     private boolean drawBackground = true;
@@ -1686,6 +1690,22 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         };
         roundVideoPlayingDrawable = new RoundVideoPlayingDrawable(this, resourcesProvider);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
+    }
+
+    public void setShareLayout(ShareReactionLayout layout) {
+        currentShareLayout = layout;
+        setHasActiveShareLayout(layout != null);
+        if (layout == null) {
+            onShareDismissCallback.run();
+        }
+    }
+
+    public boolean isShareLayoutPresent() {
+        return currentShareLayout != null;
+    }
+
+    public void setShareOnDismissCallback(Runnable r) {
+        onShareDismissCallback = r;
     }
 
     public void setResourcesProvider(Theme.ResourcesProvider resourcesProvider) {
@@ -3898,6 +3918,14 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 checkTextSelection(event);
                 return super.onTouchEvent(event);
             }
+        }
+
+        if (hasActiveShareLayout() && currentShareLayout != null) {
+            boolean result = currentShareLayout.onTouchEvent(event);
+            if (event.getAction() == MotionEvent.ACTION_UP) {
+                setShareLayout(null);
+            }
+            return result;
         }
 
         if (checkTextSelection(event)) {

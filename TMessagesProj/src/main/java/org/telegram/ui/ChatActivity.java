@@ -35661,6 +35661,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 index++;
             }
 
+            cell.setShareLayout(shareLayout);
+            cell.setShareOnDismissCallback(() -> {
+                chatLayoutManager.setCanScrollVertically(true);
+            });
+            chatLayoutManager.setCanScrollVertically(false);
             shareLayout.show(contentView, users,touchX, lastTouchY);
             return true;
         }

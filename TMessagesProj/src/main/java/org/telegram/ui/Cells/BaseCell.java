@@ -65,6 +65,38 @@ public abstract class BaseCell extends ViewGroup implements SizeNotifierFrameLay
     private CheckForLongPress pendingCheckForLongPress = null;
     private int pressCount = 0;
     private CheckForTap pendingCheckForTap = null;
+    private boolean hasActiveShareLayout = false;
+
+    protected void setHasActiveShareLayout(boolean active) {
+        hasActiveShareLayout = active;
+    }
+
+    protected boolean hasActiveShareLayout() {
+        return hasActiveShareLayout;
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (hasActiveShareLayout) {
+            // If share layout is active, allow touch events to continue
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    // Handle initial touch
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    // Allow movement within share layout
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    // Reset state when touch ends
+                    hasActiveShareLayout = false;
+                    cancelCheckLongPress();
+                    return true;
+            }
+        }
+        return super.onTouchEvent(event);
+    }
+
 
     public BaseCell(Context context) {
         super(context);

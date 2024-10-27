@@ -107,10 +107,10 @@ public class ShareReactionLayout extends FrameLayout {
     public boolean onTouchEvent(MotionEvent event) {
         switch (event.getAction()) {
             case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
                 dismiss();
                 return true;
             case MotionEvent.ACTION_MOVE:
+            case MotionEvent.ACTION_CANCEL:
                 // Optional: You can add distance check here if you want to dismiss when dragged too far
                 if (isDragging) {
                     float dx = event.getX() - touchX;
