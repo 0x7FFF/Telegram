@@ -35641,7 +35641,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 recentDialogs.addAll(MessagesController.getInstance(currentAccount).dialogsForward);
             }
 
-            int size = Math.min(recentDialogs.size(), 5);
+            int size = Math.min(recentDialogs.size(), 4);
             ArrayList<TLRPC.User> users = new ArrayList<TLRPC.User>();
 
             int index = 0;

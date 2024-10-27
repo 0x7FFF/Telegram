@@ -4,6 +4,7 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -11,23 +12,17 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
 import android.graphics.RectF;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.R;
 import org.telegram.tgnet.TLRPC;
 
-import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.ImageReceiver;
 import org.telegram.ui.ActionBar.Theme;
 
@@ -180,20 +175,80 @@ public class ShareReactionLayout extends FrameLayout {
             requestLayout();
         });
 
-        // Stagger animate options
+        int centerIndex = shareOptions.size() / 2;
+        long baseDelay = 50L;
+
         for (int i = 0; i < shareOptions.size(); i++) {
             ShareOption option = shareOptions.get(i);
-            option.setAlpha(0f);
-            option.setScaleX(0.5f);
-            option.setScaleY(0.5f);
+            option.animate().cancel();
 
-            option.animate()
-                    .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(150)
-                    .setStartDelay(50 + i * 40L) // Slightly longer delay between items
-                    .setInterpolator(CubicBezierInterpolator.DEFAULT);
+            // Force initial state
+            option.setVisibility(VISIBLE);
+            option.setAlpha(0f);
+
+            float initialScale;
+            int distanceFromCenter = Math.abs(i - centerIndex);
+
+            if (i == centerIndex) {
+                initialScale = 0.7f;
+            } else if (distanceFromCenter == 1) {
+                initialScale = 0.6f;
+            } else {
+                initialScale = 0.5f;
+            }
+
+            // Immediately apply initial scale
+            option.setScaleX(initialScale);
+            option.setScaleY(initialScale);
+            option.invalidate();
+
+            long delay;
+            if (i == centerIndex) {
+                delay = baseDelay;
+            } else if (distanceFromCenter == 1) {
+                delay = baseDelay * 2;
+            } else {
+                delay = baseDelay * 3;
+            }
+
+            final float finalInitialScale = initialScale;
+
+            // Create animator set with listeners
+            AnimatorSet set = new AnimatorSet();
+            ValueAnimator scaleAnimator = ValueAnimator.ofFloat(initialScale, 1f);
+            scaleAnimator.addUpdateListener(animation -> {
+                float value = (float) animation.getAnimatedValue();
+                option.setScaleX(value);
+                option.setScaleY(value);
+                option.invalidate();
+            });
+            scaleAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            scaleAnimator.addUpdateListener(animation -> {
+                float value = (float) animation.getAnimatedValue();
+                option.setScaleX(value);
+                option.setScaleY(value);
+                option.invalidate();
+            });
+
+            ValueAnimator alphaAnimator = ValueAnimator.ofFloat(0f, 1f);
+            alphaAnimator.addUpdateListener(animation -> {
+                option.setAlpha((float) animation.getAnimatedValue());
+            });
+            alphaAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT); // Keep alpha smooth
+
+            set.playTogether(scaleAnimator, alphaAnimator);
+            set.setStartDelay(delay);
+            set.setDuration(100);
+            set.setInterpolator(CubicBezierInterpolator.DEFAULT);
+            set.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationStart(Animator animation) {
+                    option.setScaleX(finalInitialScale);
+                    option.setScaleY(finalInitialScale);
+                    option.invalidate();
+                }
+            });
+            set.start();
         }
 
         containerAnimator.start();
@@ -223,7 +278,7 @@ public class ShareReactionLayout extends FrameLayout {
 
     private class ShareOption extends View {
         private ImageReceiver imageReceiver;
-        private float scale = 1f;
+        private float currentScale = 1f;
         private boolean isBookmark;
         private Paint avatarPaint;
         private Path clipPath;
@@ -299,28 +354,26 @@ public class ShareReactionLayout extends FrameLayout {
 
         @Override
         protected void onDraw(Canvas canvas) {
+            float currentScaleX = getScaleX();
+            float currentScaleY = getScaleY();
+
+            canvas.save();
+            canvas.scale(currentScaleX, currentScaleY, getWidth() / 2f, getHeight() / 2f);
+
             if (isBookmark) {
-                canvas.save();
                 canvas.clipPath(clipPath);
-
-                // Draw background circle
                 canvas.drawCircle(getWidth()/2f, getHeight()/2f, getWidth()/2f, avatarPaint);
-
-                // Draw bookmark icon
                 bookmarkDrawable.draw(canvas);
-
-                canvas.restore();
             } else {
-                canvas.save();
-                // Apply circular clip
                 canvas.clipPath(clipPath);
-                // Scale from center
-                canvas.scale(scale, scale, getWidth()/2f, getHeight()/2f);
-                // Draw avatar
                 imageReceiver.setImageCoords(0, 0, getWidth(), getHeight());
-                imageReceiver.setRoundRadius(getWidth()); // Make image receiver round
                 imageReceiver.draw(canvas);
-                canvas.restore();
+            }
+            canvas.restore();
+
+            // Force redraw if still animating
+            if (currentScaleX != 1f || currentScaleY != 1f) {
+                postInvalidateOnAnimation();
             }
         }
 
@@ -335,6 +388,4 @@ public class ShareReactionLayout extends FrameLayout {
                     .start();
         }
     }
-
-    // Rest of the touch handling, dismiss animation etc...
 }
