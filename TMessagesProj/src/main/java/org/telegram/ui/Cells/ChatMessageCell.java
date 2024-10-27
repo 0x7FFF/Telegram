@@ -504,6 +504,10 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             return false;
         }
 
+        default boolean didLongPressShareButton(ChatMessageCell cell, float touchX, float touchY) {
+            return false;
+        }
+
         default void didPressCancelSendButton(ChatMessageCell cell) {
         }
 
@@ -4123,6 +4127,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                             } else {
                                 pressedSideButton = drawSideButton;
                             }
+                            startCheckLongPress();
                             sideButtonPressed = true;
                         }
                         result = true;
@@ -4341,21 +4346,24 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                     }
                 } else if (sideButtonPressed) {
                     if (event.getAction() == MotionEvent.ACTION_UP) {
-                        playSoundEffect(SoundEffectConstants.CLICK);
-                        if (delegate != null) {
-                            if (pressedSideButton == SIDE_BUTTON_SPONSORED_CLOSE) {
-                                delegate.didPressSponsoredClose(this);
-                            } else if (pressedSideButton == SIDE_BUTTON_SPONSORED_MORE) {
-                                delegate.didPressSponsoredInfo(this, x, y);
-                            } else if (pressedSideButton == 3) {
-                                delegate.didPressCommentButton(this);
-                            } else {
-                                delegate.didPressSideButton(this);
+                        if (!hadLongPress) {
+                            playSoundEffect(SoundEffectConstants.CLICK);
+                            if (delegate != null) {
+                                if (pressedSideButton == SIDE_BUTTON_SPONSORED_CLOSE) {
+                                    delegate.didPressSponsoredClose(this);
+                                } else if (pressedSideButton == SIDE_BUTTON_SPONSORED_MORE) {
+                                    delegate.didPressSponsoredInfo(this, x, y);
+                                } else if (pressedSideButton == 3) {
+                                    delegate.didPressCommentButton(this);
+                                } else {
+                                    delegate.didPressSideButton(this);
+                                }
                             }
                         }
                         sideButtonPressed = false;
                         pressedSideButton = 0;
                     } else if (event.getAction() == MotionEvent.ACTION_CANCEL) {
+                        cancelCheckLongPress();
                         sideButtonPressed = false;
                         pressedSideButton = 0;
                     } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
@@ -4364,6 +4372,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                             x >= sideStartX - dp(24) && x <= sideStartX + dp(40) &&
                             y >= sideStartY - dp(24) && y <= sideStartY + dp(38 + (drawSideButton == 3 && commentLayout != null ? 18 : 0) + (drawSideButton2 == SIDE_BUTTON_SPONSORED_MORE ? 38 : 0))
                         )) {
+                            cancelCheckLongPress();
                             sideButtonPressed = false;
                             pressedSideButton = 0;
                         }
@@ -10057,7 +10066,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         }
 
         linkPreviewPressed = false;
-        sideButtonPressed = false;
+//        sideButtonPressed = false;
         pressedSideButton = 0;
         imagePressed = false;
         timePressed = false;
@@ -10110,6 +10119,10 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                     }
                     handled = delegate.didLongPressChannelAvatar(this, currentChat, id, lastTouchX, lastTouchY);
                 }
+            }
+
+            if (sideButtonPressed) {
+                handled = delegate.didLongPressShareButton(this, lastTouchX, lastTouchY);
             }
 
             if (!handled) {

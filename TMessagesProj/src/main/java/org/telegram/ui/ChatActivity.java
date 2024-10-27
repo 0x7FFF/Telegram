@@ -35632,6 +35632,35 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             return false;
         }
 
+        @Override
+        public boolean didLongPressShareButton(ChatMessageCell cell, float touchX, float touchY) {
+            ShareReactionLayout shareLayout = new ShareReactionLayout(getContext());
+            ArrayList<TLRPC.Dialog> recentDialogs = new ArrayList<TLRPC.Dialog>();
+
+            if (!MessagesController.getInstance(currentAccount).dialogsForward.isEmpty()) {
+                recentDialogs.addAll(MessagesController.getInstance(currentAccount).dialogsForward);
+            }
+
+            int size = Math.min(recentDialogs.size(), 5);
+            ArrayList<TLRPC.User> users = new ArrayList<TLRPC.User>();
+
+            int index = 0;
+
+            while (users.size() < size && index < recentDialogs.size()) {
+                TLRPC.Dialog dialog = recentDialogs.get(index);
+                TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(dialog.id);
+
+                if (user != null) {
+                    users.add(user);
+                }
+
+                index++;
+            }
+
+            shareLayout.show(contentView, users,touchX, lastTouchY);
+            return true;
+        }
+
         private void openProfile(TLRPC.User user) {
             openProfile(user, false);
         }
