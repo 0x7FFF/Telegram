@@ -23,7 +23,11 @@ import android.widget.FrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SendMessagesHelper;
+import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLRPC;
 
 import org.telegram.messenger.ImageReceiver;
@@ -31,6 +35,7 @@ import org.telegram.ui.ActionBar.Theme;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 public class ShareReactionLayout extends FrameLayout {
     private Paint backgroundPaint;
@@ -42,6 +47,8 @@ public class ShareReactionLayout extends FrameLayout {
     private float touchX, touchY;
     private Drawable shadowDrawable;
     private ShareOption touchedOption;
+    private MessageObject messageObject;
+    private Function<TLRPC.User, Void> onShowBulletinCallback;
 
     public ShareReactionLayout(Context context) {
         super(context);
@@ -57,9 +64,9 @@ public class ShareReactionLayout extends FrameLayout {
         setWillNotDraw(false);
     }
 
-    public void show(View messageView, ArrayList<TLRPC.User> users, float touchX, float touchY) {
-        this.messageView = messageView;
-
+    public void show(View messageView, MessageObject message, ArrayList<TLRPC.User> users, float touchX, float touchY, Function<TLRPC.User, Void> showBulletin) {
+        messageObject = message;
+        onShowBulletinCallback = showBulletin;
         // Get absolute coordinates
         int[] location = new int[2];
         messageView.getLocationInWindow(location);
@@ -83,12 +90,6 @@ public class ShareReactionLayout extends FrameLayout {
 
         WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
         wm.addView(this, params);
-
-        // Add bookmark option first
-        ShareOption bookmarkOption = new ShareOption(getContext());
-        bookmarkOption.setBookmark();
-        addView(bookmarkOption);
-        shareOptions.add(bookmarkOption);
 
         // Add user options
         for (TLRPC.User user : users) {
@@ -153,6 +154,25 @@ public class ShareReactionLayout extends FrameLayout {
 
             case MotionEvent.ACTION_UP:
                 if (touchedOption != null) {
+                    TLRPC.User selectedUser = touchedOption.getUser();
+                    if (selectedUser != null && messageObject != null) {
+                        ArrayList<MessageObject> messages = new ArrayList<>();
+                        if (messageObject.getGroupId() != 0) {
+//                            MessageObject.GroupedMessages groupedMessages = MessagesController.getInstance(UserConfig.selectedAccount).getGroupedMessages().get(messageObject.getGroupId());
+//                            if (groupedMessages != null) {
+//                                messages.addAll(groupedMessages.messages);
+//                            }
+                        } else {
+                            messages.add(messageObject);
+                        }
+
+                        // Send message to selected user
+                        long dialogId = selectedUser.id;
+                        SendMessagesHelper.getInstance(UserConfig.selectedAccount).sendMessage(messages, dialogId, false, false, true, 0);
+                        if (onShowBulletinCallback != null) {
+                            onShowBulletinCallback.apply(selectedUser);
+                        }
+                    }
                     touchedOption.setTouched(false);
                     touchedOption = null;
                 }
@@ -407,18 +427,16 @@ public class ShareReactionLayout extends FrameLayout {
 
     private class ShareOption extends View {
         private ImageReceiver imageReceiver;
-        private float currentScale = 1f;
-        private boolean isBookmark;
         private Paint avatarPaint;
         private Path clipPath;
         private AvatarDrawable bookmarkDrawable;
         private ValueAnimator touchScaleAnimator;
         private boolean isTouched;
         private AnimatorSet appearAnimator;
-        private static final float TOUCH_SCALE = 1.21f;
+        private static final float TOUCH_SCALE = 1.11f;
         private ValueAnimator scaleAnimator;
         private float touchScale = 1f;
-
+        private TLRPC.User user;
 
         public ShareOption(Context context) {
             super(context);
@@ -461,13 +479,14 @@ public class ShareReactionLayout extends FrameLayout {
             });
             touchScaleAnimator.start();
         }
-        public void setBookmark() {
-            isBookmark = true;
-            invalidate();
+
+        public TLRPC.User getUser() {
+            return user;
         }
 
         public void setUser(TLRPC.User user) {
-            if (!isBookmark && user != null) {
+            if (user != null) {
+                this.user = user;
                 // Set default fallback avatar color
                 int color = AvatarDrawable.getColorForId(user.id);
 
@@ -477,7 +496,10 @@ public class ShareReactionLayout extends FrameLayout {
                 avatarDrawable.setInfo(user);
 
                 // Set user photo if exists, otherwise use fallback
-                if (user.photo != null && user.photo.photo_small != null) {
+                if (UserObject.isUserSelf(user)) {
+                    imageReceiver.setImageBitmap(bookmarkDrawable);
+                }
+                else if (user.photo != null && user.photo.photo_small != null) {
                     imageReceiver.setForUserOrChat(
                             user,
                             avatarDrawable,
@@ -497,18 +519,6 @@ public class ShareReactionLayout extends FrameLayout {
             // Update circular clip path when size changes
             clipPath.reset();
             clipPath.addCircle(w / 2f, h / 2f, Math.min(w, h) / 2f, Path.Direction.CW);
-
-            if (bookmarkDrawable != null) {
-                int drawableSize = Math.min(w, h);
-                int left = (w - drawableSize) / 2;
-                int top = (h - drawableSize) / 2;
-                bookmarkDrawable.setBounds(
-                        left,
-                        top,
-                        left + drawableSize,
-                        top + drawableSize
-                );
-            }
         }
 
         @Override
@@ -521,15 +531,9 @@ public class ShareReactionLayout extends FrameLayout {
                 canvas.scale(touchScale, touchScale, px, py);
             }
 
-            if (isBookmark) {
-                canvas.clipPath(clipPath);
-                canvas.drawCircle(getWidth()/2f, getHeight()/2f, getWidth()/2f, avatarPaint);
-                bookmarkDrawable.draw(canvas);
-            } else {
-                canvas.clipPath(clipPath);
-                imageReceiver.setImageCoords(0, 0, getWidth(), getHeight());
-                imageReceiver.draw(canvas);
-            }
+            canvas.clipPath(clipPath);
+            imageReceiver.setImageCoords(0, 0, getWidth(), getHeight());
+            imageReceiver.draw(canvas);
 
             canvas.restore();
         }

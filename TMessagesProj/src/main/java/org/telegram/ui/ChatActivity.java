@@ -281,6 +281,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -35641,7 +35642,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 recentDialogs.addAll(MessagesController.getInstance(currentAccount).dialogsForward);
             }
 
-            int size = Math.min(recentDialogs.size(), 4);
+            int size = Math.min(recentDialogs.size(), 5);
             ArrayList<TLRPC.User> users = new ArrayList<TLRPC.User>();
 
             int index = 0;
@@ -35666,7 +35667,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 chatLayoutManager.setCanScrollVertically(true);
             });
             chatLayoutManager.setCanScrollVertically(false);
-            shareLayout.show(contentView, users,touchX, lastTouchY);
+            shareLayout.show(contentView, cell.getMessageObject(), users, touchX, lastTouchY, user -> {
+                SpannableStringBuilder userName = AndroidUtilities.replaceTags(LocaleController.formatString("FwdMessageToUser", R.string.FwdMessageToUser, UserObject.getFirstName(user)));
+                BulletinFactory.of(ChatActivity.this).createSimpleBulletin(R.raw.forward, userName).show(false);
+                return null;
+            });
             return true;
         }
 
