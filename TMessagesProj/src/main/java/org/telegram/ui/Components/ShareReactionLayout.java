@@ -22,6 +22,7 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
 import org.telegram.tgnet.TLRPC;
 
@@ -35,15 +36,12 @@ public class ShareReactionLayout extends FrameLayout {
     private Paint backgroundPaint;
     private Paint containerPaint;
     private RectF containerRect = new RectF();
-    private float containerAlpha = 0f;
     private float appearProgress = 0f;
     private List<ShareOption> shareOptions = new ArrayList<>();
     private boolean dismissed;
     private float touchX, touchY;
-    private View messageView;
     private Drawable shadowDrawable;
-    private boolean isDragging;
-    private View initialTouchedView;
+    private ShareOption touchedOption;
 
     public ShareReactionLayout(Context context) {
         super(context);
@@ -101,25 +99,70 @@ public class ShareReactionLayout extends FrameLayout {
         }
 
         animateAppear();
+        checkForTouchedOption(touchX, touchY);
+    }
+
+    private void checkForTouchedOption(float x, float y) {
+        FileLog.d("ShareLayout checking touch at " + x + "," + y);
+
+        // Reset previous touch state
+        if (touchedOption != null) {
+            touchedOption.setTouched(false);
+            touchedOption = null;
+        }
+
+        // Find which option is under the touch point
+        for (ShareOption option : shareOptions) {
+            int[] location = new int[2];
+            option.getLocationOnScreen(location);
+
+            float left = location[0];
+            float top = location[1];
+            float right = left + option.getWidth();
+            float bottom = top + option.getHeight();
+
+            boolean touched = x >= left && x <= right && y >= top && y <= bottom;
+
+            if (touched) {
+                touchedOption = option;
+                touchedOption.setTouched(true);
+                FileLog.d("ShareLayout found touched option at " + left + "," + top);
+                break;
+            }
+        }
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent event) {
+        // Always intercept touch events
+        return true;
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        float rawX = event.getRawX();
+        float rawY = event.getRawY();
+
+        FileLog.d("ShareLayout touch: action=" + event.getAction() +
+                " rawXY=(" + rawX + "," + rawY + ")");
+
         switch (event.getAction()) {
+            case MotionEvent.ACTION_MOVE:
+                checkForTouchedOption(rawX, rawY);
+                return true;
+
             case MotionEvent.ACTION_UP:
+                if (touchedOption != null) {
+                    touchedOption.setTouched(false);
+                    touchedOption = null;
+                }
                 dismiss();
                 return true;
-            case MotionEvent.ACTION_MOVE:
+
             case MotionEvent.ACTION_CANCEL:
-                // Optional: You can add distance check here if you want to dismiss when dragged too far
-                if (isDragging) {
-                    float dx = event.getX() - touchX;
-                    float dy = event.getY() - touchY;
-                    float distance = (float) Math.sqrt(dx * dx + dy * dy);
-                    if (distance > dp(40)) {  // Adjust threshold as needed
-                        dismiss();
-                        return true;
-                    }
+                if (touchedOption != null) {
+                    touchedOption.setTouched(false);
+                    touchedOption = null;
                 }
                 return true;
         }
@@ -205,8 +248,6 @@ public class ShareReactionLayout extends FrameLayout {
         // Position above touch point
         containerRect.bottom = touchY - dp(8);
         containerRect.top = containerRect.bottom - height;
-//        float width = dp(40 + shareOptions.size() * 44);
-//        float height = dp(48);
 
         // Center on touch point
         containerRect.left = touchX - width / 2;
@@ -254,7 +295,6 @@ public class ShareReactionLayout extends FrameLayout {
         ValueAnimator containerAnimator = ValueAnimator.ofFloat(0, 1);
         containerAnimator.setDuration(250);
         containerAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
-
         containerAnimator.addUpdateListener(animation -> {
             appearProgress = (float) animation.getAnimatedValue();
             invalidate();
@@ -309,18 +349,12 @@ public class ShareReactionLayout extends FrameLayout {
                 option.invalidate();
             });
             scaleAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
-            scaleAnimator.addUpdateListener(animation -> {
-                float value = (float) animation.getAnimatedValue();
-                option.setScaleX(value);
-                option.setScaleY(value);
-                option.invalidate();
-            });
 
             ValueAnimator alphaAnimator = ValueAnimator.ofFloat(0f, 1f);
             alphaAnimator.addUpdateListener(animation -> {
                 option.setAlpha((float) animation.getAnimatedValue());
             });
-            alphaAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT); // Keep alpha smooth
+            alphaAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
 
             set.playTogether(scaleAnimator, alphaAnimator);
             set.setStartDelay(delay);
@@ -334,6 +368,9 @@ public class ShareReactionLayout extends FrameLayout {
                     option.invalidate();
                 }
             });
+
+            // Store appear animator in the option
+            option.appearAnimator = set;
             set.start();
         }
 
@@ -341,12 +378,16 @@ public class ShareReactionLayout extends FrameLayout {
     }
 
     @Override
-    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+    public void onLayout(boolean changed, int l, int t, int r, int b) {
+        // Add logging to see view positions
         int itemSize = dp(36);
         int spacing = dp(4);
 
         float startX = containerRect.left + dp(8);
         float centerY = containerRect.top + (containerRect.height() - itemSize) / 2;
+
+        FileLog.d("ShareLayout onLayout: container at " + containerRect.left + "," + containerRect.top +
+                " size " + containerRect.width() + "x" + containerRect.height());
 
         for (int i = 0; i < shareOptions.size(); i++) {
             ShareOption option = shareOptions.get(i);
@@ -359,6 +400,8 @@ public class ShareReactionLayout extends FrameLayout {
                     left + itemSize,
                     top + itemSize
             );
+
+            FileLog.d("ShareLayout laid out option " + i + " at " + left + "," + top);
         }
     }
 
@@ -369,6 +412,13 @@ public class ShareReactionLayout extends FrameLayout {
         private Paint avatarPaint;
         private Path clipPath;
         private AvatarDrawable bookmarkDrawable;
+        private ValueAnimator touchScaleAnimator;
+        private boolean isTouched;
+        private AnimatorSet appearAnimator;
+        private static final float TOUCH_SCALE = 1.21f;
+        private ValueAnimator scaleAnimator;
+        private float touchScale = 1f;
+
 
         public ShareOption(Context context) {
             super(context);
@@ -380,14 +430,37 @@ public class ShareReactionLayout extends FrameLayout {
             avatarPaint.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
 
             clipPath = new Path();
-//            bookmarkDrawable = context.getResources().getDrawable(R.drawable.chats_saved).mutate();
-//            if (bookmarkDrawable != null) {
-//                bookmarkDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueIcon), PorterDuff.Mode.MULTIPLY));
-//            }
             bookmarkDrawable = new AvatarDrawable();
             bookmarkDrawable.setAvatarType(AvatarDrawable.AVATAR_TYPE_SAVED);
         }
 
+        public void setTouched(boolean touched) {
+            if (isTouched == touched) {
+                return;
+            }
+
+            isTouched = touched;
+            FileLog.d("ShareOption setTouched: " + touched + " scale=" + touchScale);
+
+            if (appearAnimator != null && appearAnimator.isRunning()) {
+                FileLog.d("ShareOption appear still running");
+                return;
+            }
+
+            if (touchScaleAnimator != null) {
+                touchScaleAnimator.cancel();
+            }
+
+            touchScaleAnimator = ValueAnimator.ofFloat(touchScale, touched ? TOUCH_SCALE : 1f);
+            touchScaleAnimator.setDuration(150);
+            touchScaleAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+            touchScaleAnimator.addUpdateListener(animation -> {
+                touchScale = (float) animation.getAnimatedValue();
+                FileLog.d("ShareOption scale now: " + touchScale);
+                invalidate();
+            });
+            touchScaleAnimator.start();
+        }
         public void setBookmark() {
             isBookmark = true;
             invalidate();
@@ -440,11 +513,13 @@ public class ShareReactionLayout extends FrameLayout {
 
         @Override
         protected void onDraw(Canvas canvas) {
-            float currentScaleX = getScaleX();
-            float currentScaleY = getScaleY();
-
             canvas.save();
-            canvas.scale(currentScaleX, currentScaleY, getWidth() / 2f, getHeight() / 2f);
+
+            if (touchScale != 1f) {
+                float px = getWidth() / 2f;
+                float py = getHeight() / 2f;
+                canvas.scale(touchScale, touchScale, px, py);
+            }
 
             if (isBookmark) {
                 canvas.clipPath(clipPath);
@@ -455,23 +530,31 @@ public class ShareReactionLayout extends FrameLayout {
                 imageReceiver.setImageCoords(0, 0, getWidth(), getHeight());
                 imageReceiver.draw(canvas);
             }
-            canvas.restore();
 
-            // Force redraw if still animating
-            if (currentScaleX != 1f || currentScaleY != 1f) {
-                postInvalidateOnAnimation();
+            canvas.restore();
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            if (touchScaleAnimator != null) {
+                touchScaleAnimator.cancel();
+                touchScaleAnimator = null;
+            }
+            if (appearAnimator != null) {
+                appearAnimator.cancel();
+                appearAnimator = null;
+            }
+            if (scaleAnimator != null) {
+                scaleAnimator.cancel();
+                scaleAnimator = null;
             }
         }
 
         @Override
-        public void setPressed(boolean pressed) {
-            super.setPressed(pressed);
-            animate()
-                    .scaleX(pressed ? 0.85f : 1f)
-                    .scaleY(pressed ? 0.85f : 1f)
-                    .setDuration(150)
-                    .setInterpolator(CubicBezierInterpolator.DEFAULT)
-                    .start();
+        public boolean hasOverlappingRendering() {
+            return false;
         }
+
     }
 }
