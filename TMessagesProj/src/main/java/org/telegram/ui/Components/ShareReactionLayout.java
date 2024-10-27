@@ -5,6 +5,7 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -14,6 +15,7 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -40,6 +42,8 @@ public class ShareReactionLayout extends FrameLayout {
     private float touchX, touchY;
     private View messageView;
     private Drawable shadowDrawable;
+    private boolean isDragging;
+    private View initialTouchedView;
 
     public ShareReactionLayout(Context context) {
         super(context);
@@ -97,6 +101,88 @@ public class ShareReactionLayout extends FrameLayout {
         }
 
         animateAppear();
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                dismiss();
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                // Optional: You can add distance check here if you want to dismiss when dragged too far
+                if (isDragging) {
+                    float dx = event.getX() - touchX;
+                    float dy = event.getY() - touchY;
+                    float distance = (float) Math.sqrt(dx * dx + dy * dy);
+                    if (distance > dp(40)) {  // Adjust threshold as needed
+                        dismiss();
+                        return true;
+                    }
+                }
+                return true;
+        }
+        return true;
+    }
+
+    public void dismiss() {
+        if (dismissed) {
+            return;
+        }
+        dismissed = true;
+
+        AnimatorSet dismissSet = new AnimatorSet();
+        ArrayList<Animator> animators = new ArrayList<>();
+
+        // Animate container
+        ValueAnimator containerAnimator = ValueAnimator.ofFloat(1, 0);
+        containerAnimator.addUpdateListener(animation -> {
+            appearProgress = (float) animation.getAnimatedValue();
+            invalidate();
+        });
+        animators.add(containerAnimator);
+
+        // Animate share options
+        int centerIndex = shareOptions.size() / 2;
+        for (int i = 0; i < shareOptions.size(); i++) {
+            ShareOption option = shareOptions.get(i);
+            int distanceFromCenter = Math.abs(i - centerIndex);
+
+            long delay;
+            if (distanceFromCenter == 2) {
+                delay = 0;
+            } else if (distanceFromCenter == 1) {
+                delay = 30;
+            } else {
+                delay = 60;
+            }
+
+            ObjectAnimator scaleX = ObjectAnimator.ofFloat(option, View.SCALE_X, option.getScaleX(), 0f);
+            ObjectAnimator scaleY = ObjectAnimator.ofFloat(option, View.SCALE_Y, option.getScaleY(), 0f);
+            ObjectAnimator alpha = ObjectAnimator.ofFloat(option, View.ALPHA, option.getAlpha(), 0f);
+
+            scaleX.setStartDelay(delay);
+            scaleY.setStartDelay(delay);
+            alpha.setStartDelay(delay);
+
+            animators.add(scaleX);
+            animators.add(scaleY);
+            animators.add(alpha);
+        }
+
+        dismissSet.playTogether(animators);
+        dismissSet.setDuration(100);
+        dismissSet.setInterpolator(CubicBezierInterpolator.DEFAULT);
+        dismissSet.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (getParent() != null) {
+                    ((WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE)).removeView(ShareReactionLayout.this);
+                }
+            }
+        });
+        dismissSet.start();
     }
 
     @Override
