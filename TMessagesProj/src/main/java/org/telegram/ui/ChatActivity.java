@@ -35648,7 +35648,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
             while (users.size() < size && index < recentDialogs.size()) {
                 TLRPC.Dialog dialog = recentDialogs.get(index);
-                TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(dialog.id);
+                long id = dialog.id;
+                if (id < 0) {
+                    id = -id;
+                }
+                TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(id);
 
                 if (user != null) {
                     users.add(user);

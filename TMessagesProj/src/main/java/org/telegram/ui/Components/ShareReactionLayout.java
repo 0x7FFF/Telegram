@@ -11,6 +11,8 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.RectF;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -104,19 +106,41 @@ public class ShareReactionLayout extends FrameLayout {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        float width = dp(40 + shareOptions.size() * 44);
+        int itemCount = shareOptions.size();
+        int itemSize = dp(36); // Avatar size
+        int itemSpacing = dp(4); // Space between items
+        float sidePadding = dp(8); // Padding on left and right of container
+
+        // Calculate exact width needed
+        float width = (itemCount * itemSize) + // Total width of all avatars
+                ((itemCount - 1) * itemSpacing) + // Total spacing between avatars
+                (sidePadding * 2); // Left and right padding
         float height = dp(48);
 
-        // Center horizontally on touch point
+        // Center on touch point
+        containerRect.left = touchX - width / 2;
+        containerRect.right = containerRect.left + width;
+
+        // Position above touch point
+        containerRect.bottom = touchY - dp(8);
+        containerRect.top = containerRect.bottom - height;
+//        float width = dp(40 + shareOptions.size() * 44);
+//        float height = dp(48);
+
+        // Center on touch point
         containerRect.left = touchX - width / 2;
         containerRect.right = touchX + width / 2;
 
-        // Position relative to touch point with fixed offset
-        float offset = dp(40); // Fixed offset above touch point
+        // Position above touch point with fixed offset
+        float offset = dp(40);
         containerRect.bottom = touchY - offset;
         containerRect.top = containerRect.bottom - height;
 
-        // Screen bounds checking
+        // Add clip rect to prevent drawing outside bounds
+        canvas.save();
+        canvas.clipRect(0, 0, getWidth(), getHeight());
+
+        // Screen bounds check - Adjust to prevent overflow
         if (containerRect.left < dp(16)) {
             containerRect.left = dp(16);
             containerRect.right = containerRect.left + width;
@@ -125,28 +149,16 @@ public class ShareReactionLayout extends FrameLayout {
             containerRect.left = containerRect.right - width;
         }
 
-        // Top screen bounds check
-        if (containerRect.top < dp(16)) {
-            // If there's not enough space above, show below the touch point
-            containerRect.top = touchY + offset;
-            containerRect.bottom = containerRect.top + height;
-        }
-
-        // Scale animation from touch point
         float scale = 0.5f + 0.5f * appearProgress;
-        float centerX = touchX;
-        float centerY = touchY;
+        canvas.scale(scale, scale, touchX, touchY);
 
-        canvas.save();
-        canvas.scale(scale, scale, centerX, centerY);
-
-        // Draw shadow and container
+        // Draw shadow with tighter bounds
         if (shadowDrawable != null) {
             shadowDrawable.setBounds(
-                    (int)containerRect.left - dp(3),
-                    (int)containerRect.top - dp(3),
-                    (int)containerRect.right + dp(3),
-                    (int)containerRect.bottom + dp(3)
+                    (int)containerRect.left - dp(2), // Reduced shadow padding
+                    (int)containerRect.top - dp(2),
+                    (int)containerRect.right + dp(2),
+                    (int)containerRect.bottom + dp(2)
             );
             shadowDrawable.setAlpha((int)(255 * appearProgress));
             shadowDrawable.draw(canvas);
@@ -189,16 +201,16 @@ public class ShareReactionLayout extends FrameLayout {
 
     @Override
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
-        int itemSize = dp(40);
+        int itemSize = dp(36);
         int spacing = dp(4);
 
         float startX = containerRect.left + dp(8);
-        float centerY = containerRect.top + containerRect.height() / 2;
+        float centerY = containerRect.top + (containerRect.height() - itemSize) / 2;
 
         for (int i = 0; i < shareOptions.size(); i++) {
             ShareOption option = shareOptions.get(i);
             int left = (int) (startX + i * (itemSize + spacing));
-            int top = (int) (centerY - itemSize / 2);
+            int top = (int) centerY;
 
             option.layout(
                     left,
@@ -213,26 +225,74 @@ public class ShareReactionLayout extends FrameLayout {
         private ImageReceiver imageReceiver;
         private float scale = 1f;
         private boolean isBookmark;
+        private Paint avatarPaint;
+        private Path clipPath;
+        private AvatarDrawable bookmarkDrawable;
 
         public ShareOption(Context context) {
             super(context);
             imageReceiver = new ImageReceiver(this);
+            imageReceiver.setRoundRadius(dp(36));
+
+            // Initialize paint for avatar border if needed
+            avatarPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            avatarPaint.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+
+            clipPath = new Path();
+//            bookmarkDrawable = context.getResources().getDrawable(R.drawable.chats_saved).mutate();
+//            if (bookmarkDrawable != null) {
+//                bookmarkDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueIcon), PorterDuff.Mode.MULTIPLY));
+//            }
+            bookmarkDrawable = new AvatarDrawable();
+            bookmarkDrawable.setAvatarType(AvatarDrawable.AVATAR_TYPE_SAVED);
         }
 
         public void setBookmark() {
             isBookmark = true;
+            invalidate();
         }
 
         public void setUser(TLRPC.User user) {
-            if (!isBookmark) {
-                imageReceiver.setImage(
-                        ImageLocation.getForUser(user, ImageLocation.TYPE_SMALL),
-                        "40_40",
-                        new ColorDrawable(Theme.getColor(Theme.key_windowBackgroundWhite)),
-                        0,
-                        null,
-                        null,
-                        0
+            if (!isBookmark && user != null) {
+                // Set default fallback avatar color
+                int color = AvatarDrawable.getColorForId(user.id);
+
+                // Create fallback drawable
+                AvatarDrawable avatarDrawable = new AvatarDrawable();
+                avatarDrawable.setColor(color);
+                avatarDrawable.setInfo(user);
+
+                // Set user photo if exists, otherwise use fallback
+                if (user.photo != null && user.photo.photo_small != null) {
+                    imageReceiver.setForUserOrChat(
+                            user,
+                            avatarDrawable,
+                            true // Allow animations
+                    );
+                } else {
+                    imageReceiver.setImageBitmap(avatarDrawable);
+                }
+                imageReceiver.setRoundRadius(getMeasuredWidth() / 2);
+                invalidate();
+            }
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            // Update circular clip path when size changes
+            clipPath.reset();
+            clipPath.addCircle(w / 2f, h / 2f, Math.min(w, h) / 2f, Path.Direction.CW);
+
+            if (bookmarkDrawable != null) {
+                int drawableSize = Math.min(w, h);
+                int left = (w - drawableSize) / 2;
+                int top = (h - drawableSize) / 2;
+                bookmarkDrawable.setBounds(
+                        left,
+                        top,
+                        left + drawableSize,
+                        top + drawableSize
                 );
             }
         }
@@ -240,15 +300,39 @@ public class ShareReactionLayout extends FrameLayout {
         @Override
         protected void onDraw(Canvas canvas) {
             if (isBookmark) {
+                canvas.save();
+                canvas.clipPath(clipPath);
+
+                // Draw background circle
+                canvas.drawCircle(getWidth()/2f, getHeight()/2f, getWidth()/2f, avatarPaint);
+
                 // Draw bookmark icon
-                Theme.dialogs_archiveAvatarDrawable.draw(canvas);
+                bookmarkDrawable.draw(canvas);
+
+                canvas.restore();
             } else {
                 canvas.save();
+                // Apply circular clip
+                canvas.clipPath(clipPath);
+                // Scale from center
                 canvas.scale(scale, scale, getWidth()/2f, getHeight()/2f);
+                // Draw avatar
                 imageReceiver.setImageCoords(0, 0, getWidth(), getHeight());
+                imageReceiver.setRoundRadius(getWidth()); // Make image receiver round
                 imageReceiver.draw(canvas);
                 canvas.restore();
             }
+        }
+
+        @Override
+        public void setPressed(boolean pressed) {
+            super.setPressed(pressed);
+            animate()
+                    .scaleX(pressed ? 0.85f : 1f)
+                    .scaleY(pressed ? 0.85f : 1f)
+                    .setDuration(150)
+                    .setInterpolator(CubicBezierInterpolator.DEFAULT)
+                    .start();
         }
     }
 
