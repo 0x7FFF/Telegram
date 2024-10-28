@@ -14,6 +14,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.view.Gravity;
@@ -229,6 +230,14 @@ public class ShareReactionLayout extends FrameLayout {
     protected void onDraw(Canvas canvas) {
         if (dismissed) return;
 
+        if (!isFullyShown) {
+            Canvas morphCanvas = new Canvas(morphBitmap);
+            morphCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+
+            Canvas blurCanvas = new Canvas(blurBitmap);
+            blurCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+        }
+
         int itemCount = shareOptions.size();
         int itemSize = dp(36);
         int itemSpacing = dp(4);
@@ -255,16 +264,17 @@ public class ShareReactionLayout extends FrameLayout {
             float scale = 0.5f + 0.5f * appearProgress;
             canvas.scale(scale, scale, touchX, touchY);
 
+            // This is the critical part that needs to be fixed
             morphProcessor.drawMorph(
                     morphBitmap,
-                    containerRect.left - morphBgX + dp(10),
-                    containerRect.top - morphBgY + dp(10),
-                    containerRect.width() - dp(20),
-                    containerRect.height() - dp(20),
-                    dp(24),
-                    touchX - morphBgX,
-                    touchY - morphBgY,
-                    dp(16),
+                    containerRect.left - morphBgX,  // Removed extra padding
+                    containerRect.top - morphBgY,   // Removed extra padding
+                    containerRect.width(),          // Use full width
+                    containerRect.height(),         // Use full height
+                    dp(24),                        // Corner radius
+                    touchX - morphBgX,             // Exact touch point
+                    touchY - morphBgY,             // Exact touch point
+                    dp(20),                        // Initial circle size
                     appearProgress,
                     Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground)
             );
