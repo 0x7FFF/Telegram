@@ -8,6 +8,7 @@ import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -15,8 +16,11 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
+import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
@@ -24,6 +28,7 @@ import android.widget.FrameLayout;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.OpenGLBitmapProcessor;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.UserConfig;
@@ -38,47 +43,55 @@ import java.util.List;
 import java.util.function.Function;
 
 public class ShareReactionLayout extends FrameLayout {
-    private Paint backgroundPaint;
-    private Paint containerPaint;
-    private RectF containerRect = new RectF();
+    private final Paint containerPaint;
+    private final RectF containerRect = new RectF();
     private float appearProgress = 0f;
-    private List<ShareOption> shareOptions = new ArrayList<>();
+    private final List<ShareOption> shareOptions = new ArrayList<>();
     private boolean dismissed;
     private float touchX, touchY;
-    private Drawable shadowDrawable;
     private ShareOption touchedOption;
     private MessageObject messageObject;
     private Function<TLRPC.User, Void> onShowBulletinCallback;
+    private float hideProgress = 0f;
+    private boolean isHideAnimationRunning;
+    private boolean isFullyShown;
+    private final int bounceOffset;
+    private final OpenGLBitmapProcessor blurProcessor;
+    private final OpenGLBitmapProcessor morphProcessor;
+    private Bitmap morphBitmap;
+    private Bitmap blurBitmap;
+    private float morphBgX, morphBgY;
+    private OnDismissListener onDismissListener;
+    private final int longPressTimeout;
 
     public ShareReactionLayout(Context context) {
         super(context);
+        longPressTimeout = ViewConfiguration.getLongPressTimeout();
+        bounceOffset = dp(16);
 
-        shadowDrawable = context.getResources().getDrawable(R.drawable.popup_fixed_alert).mutate();
-
-        backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        backgroundPaint.setColor(Color.TRANSPARENT); // We don't need background dimming
+        blurProcessor = new OpenGLBitmapProcessor(context);
+        morphProcessor = new OpenGLBitmapProcessor(context);
 
         containerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         containerPaint.setColor(Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground));
 
         setWillNotDraw(false);
+        setFocusable(true);
+        setFocusableInTouchMode(true);
+        setLayerType(LAYER_TYPE_HARDWARE, null);
     }
 
-    public void show(View messageView, MessageObject message, ArrayList<TLRPC.User> users, float touchX, float touchY, Function<TLRPC.User, Void> showBulletin) {
+    public void show(View messageView, MessageObject message, ArrayList<TLRPC.User> users, float x, float y, Function<TLRPC.User, Void> showBulletin) {
         messageObject = message;
         onShowBulletinCallback = showBulletin;
-        // Get absolute coordinates
+
         int[] location = new int[2];
         messageView.getLocationInWindow(location);
-
         int statusBarHeight = AndroidUtilities.statusBarHeight;
 
-        // Calculate actual screen position
-        this.touchX = location[0] + touchX;
-        // Adjust for status bar
-        this.touchY = location[1] + touchY - statusBarHeight;
+        touchX = location[0] + x;
+        touchY = location[1] + y - statusBarHeight;
 
-        // Add the status bar height back for proper window positioning
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -91,235 +104,33 @@ public class ShareReactionLayout extends FrameLayout {
         WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
         wm.addView(this, params);
 
-        // Add user options
-        for (TLRPC.User user : users) {
-            ShareOption option = new ShareOption(getContext());
-            option.setUser(user);
-            addView(option);
-            shareOptions.add(option);
-        }
-
-        animateAppear();
-        checkForTouchedOption(touchX, touchY);
-    }
-
-    private void checkForTouchedOption(float x, float y) {
-        FileLog.d("ShareLayout checking touch at " + x + "," + y);
-
-        // Reset previous touch state
-        if (touchedOption != null) {
-            touchedOption.setTouched(false);
-            touchedOption = null;
-        }
-
-        // Find which option is under the touch point
-        for (ShareOption option : shareOptions) {
-            int[] location = new int[2];
-            option.getLocationOnScreen(location);
-
-            float left = location[0];
-            float top = location[1];
-            float right = left + option.getWidth();
-            float bottom = top + option.getHeight();
-
-            boolean touched = x >= left && x <= right && y >= top && y <= bottom;
-
-            if (touched) {
-                touchedOption = option;
-                touchedOption.setTouched(true);
-                FileLog.d("ShareLayout found touched option at " + left + "," + top);
-                break;
+        post(() -> {
+            for (TLRPC.User user : users) {
+                ShareOption option = new ShareOption(getContext());
+                option.setUser(user);
+                addView(option);
+                shareOptions.add(option);
             }
-        }
-    }
-
-    @Override
-    public boolean onInterceptTouchEvent(MotionEvent event) {
-        // Always intercept touch events
-        return true;
-    }
-
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        float rawX = event.getRawX();
-        float rawY = event.getRawY();
-
-        FileLog.d("ShareLayout touch: action=" + event.getAction() +
-                " rawXY=(" + rawX + "," + rawY + ")");
-
-        switch (event.getAction()) {
-            case MotionEvent.ACTION_MOVE:
-                checkForTouchedOption(rawX, rawY);
-                return true;
-
-            case MotionEvent.ACTION_UP:
-                if (touchedOption != null) {
-                    TLRPC.User selectedUser = touchedOption.getUser();
-                    if (selectedUser != null && messageObject != null) {
-                        ArrayList<MessageObject> messages = new ArrayList<>();
-                        if (messageObject.getGroupId() != 0) {
-//                            MessageObject.GroupedMessages groupedMessages = MessagesController.getInstance(UserConfig.selectedAccount).getGroupedMessages().get(messageObject.getGroupId());
-//                            if (groupedMessages != null) {
-//                                messages.addAll(groupedMessages.messages);
-//                            }
-                        } else {
-                            messages.add(messageObject);
-                        }
-
-                        // Send message to selected user
-                        long dialogId = selectedUser.id;
-                        SendMessagesHelper.getInstance(UserConfig.selectedAccount).sendMessage(messages, dialogId, false, false, true, 0);
-                        if (onShowBulletinCallback != null) {
-                            onShowBulletinCallback.apply(selectedUser);
-                        }
-                    }
-                    touchedOption.setTouched(false);
-                    touchedOption = null;
-                }
-                dismiss();
-                return true;
-
-            case MotionEvent.ACTION_CANCEL:
-                if (touchedOption != null) {
-                    touchedOption.setTouched(false);
-                    touchedOption = null;
-                }
-                return true;
-        }
-        return true;
-    }
-
-    public void dismiss() {
-        if (dismissed) {
-            return;
-        }
-        dismissed = true;
-
-        AnimatorSet dismissSet = new AnimatorSet();
-        ArrayList<Animator> animators = new ArrayList<>();
-
-        // Animate container
-        ValueAnimator containerAnimator = ValueAnimator.ofFloat(1, 0);
-        containerAnimator.addUpdateListener(animation -> {
-            appearProgress = (float) animation.getAnimatedValue();
-            invalidate();
+            animateAppear();
         });
-        animators.add(containerAnimator);
-
-        // Animate share options
-        int centerIndex = shareOptions.size() / 2;
-        for (int i = 0; i < shareOptions.size(); i++) {
-            ShareOption option = shareOptions.get(i);
-            int distanceFromCenter = Math.abs(i - centerIndex);
-
-            long delay;
-            if (distanceFromCenter == 2) {
-                delay = 0;
-            } else if (distanceFromCenter == 1) {
-                delay = 30;
-            } else {
-                delay = 60;
-            }
-
-            ObjectAnimator scaleX = ObjectAnimator.ofFloat(option, View.SCALE_X, option.getScaleX(), 0f);
-            ObjectAnimator scaleY = ObjectAnimator.ofFloat(option, View.SCALE_Y, option.getScaleY(), 0f);
-            ObjectAnimator alpha = ObjectAnimator.ofFloat(option, View.ALPHA, option.getAlpha(), 0f);
-
-            scaleX.setStartDelay(delay);
-            scaleY.setStartDelay(delay);
-            alpha.setStartDelay(delay);
-
-            animators.add(scaleX);
-            animators.add(scaleY);
-            animators.add(alpha);
-        }
-
-        dismissSet.playTogether(animators);
-        dismissSet.setDuration(100);
-        dismissSet.setInterpolator(CubicBezierInterpolator.DEFAULT);
-        dismissSet.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                if (getParent() != null) {
-                    ((WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE)).removeView(ShareReactionLayout.this);
-                }
-            }
-        });
-        dismissSet.start();
     }
 
-    @Override
-    protected void onDraw(Canvas canvas) {
-        int itemCount = shareOptions.size();
-        int itemSize = dp(36); // Avatar size
-        int itemSpacing = dp(4); // Space between items
-        float sidePadding = dp(8); // Padding on left and right of container
-
-        // Calculate exact width needed
-        float width = (itemCount * itemSize) + // Total width of all avatars
-                ((itemCount - 1) * itemSpacing) + // Total spacing between avatars
-                (sidePadding * 2); // Left and right padding
-        float height = dp(48);
-
-        // Center on touch point
-        containerRect.left = touchX - width / 2;
-        containerRect.right = containerRect.left + width;
-
-        // Position above touch point
-        containerRect.bottom = touchY - dp(8);
-        containerRect.top = containerRect.bottom - height;
-
-        // Center on touch point
-        containerRect.left = touchX - width / 2;
-        containerRect.right = touchX + width / 2;
-
-        // Position above touch point with fixed offset
-        float offset = dp(40);
-        containerRect.bottom = touchY - offset;
-        containerRect.top = containerRect.bottom - height;
-
-        // Add clip rect to prevent drawing outside bounds
-        canvas.save();
-        canvas.clipRect(0, 0, getWidth(), getHeight());
-
-        // Screen bounds check - Adjust to prevent overflow
-        if (containerRect.left < dp(16)) {
-            containerRect.left = dp(16);
-            containerRect.right = containerRect.left + width;
-        } else if (containerRect.right > getWidth() - dp(16)) {
-            containerRect.right = getWidth() - dp(16);
-            containerRect.left = containerRect.right - width;
-        }
-
-        float scale = 0.5f + 0.5f * appearProgress;
-        canvas.scale(scale, scale, touchX, touchY);
-
-        // Draw shadow with tighter bounds
-        if (shadowDrawable != null) {
-            shadowDrawable.setBounds(
-                    (int)containerRect.left - dp(2), // Reduced shadow padding
-                    (int)containerRect.top - dp(2),
-                    (int)containerRect.right + dp(2),
-                    (int)containerRect.bottom + dp(2)
-            );
-            shadowDrawable.setAlpha((int)(255 * appearProgress));
-            shadowDrawable.draw(canvas);
-        }
-
-        containerPaint.setAlpha((int)(255 * appearProgress));
-        canvas.drawRoundRect(containerRect, dp(24), dp(24), containerPaint);
-
-        canvas.restore();
-    }
     private void animateAppear() {
-        ValueAnimator containerAnimator = ValueAnimator.ofFloat(0, 1);
-        containerAnimator.setDuration(250);
-        containerAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
-        containerAnimator.addUpdateListener(animation -> {
+        ValueAnimator animator = ValueAnimator.ofFloat(0, 1);
+        animator.setDuration(250);
+        animator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        animator.addUpdateListener(animation -> {
             appearProgress = (float) animation.getAnimatedValue();
             invalidate();
             requestLayout();
         });
+        animator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                isFullyShown = true;
+            }
+        });
+        animator.start();
 
         int centerIndex = shareOptions.size() / 2;
         long baseDelay = 50L;
@@ -327,8 +138,6 @@ public class ShareReactionLayout extends FrameLayout {
         for (int i = 0; i < shareOptions.size(); i++) {
             ShareOption option = shareOptions.get(i);
             option.animate().cancel();
-
-            // Force initial state
             option.setVisibility(VISIBLE);
             option.setAlpha(0f);
 
@@ -343,86 +152,333 @@ public class ShareReactionLayout extends FrameLayout {
                 initialScale = 0.5f;
             }
 
-            // Immediately apply initial scale
             option.setScaleX(initialScale);
             option.setScaleY(initialScale);
             option.invalidate();
 
-            long delay;
-            if (i == centerIndex) {
-                delay = baseDelay;
-            } else if (distanceFromCenter == 1) {
-                delay = baseDelay * 2;
-            } else {
-                delay = baseDelay * 3;
-            }
+            long delay = baseDelay * (distanceFromCenter + 1);
 
-            final float finalInitialScale = initialScale;
-
-            // Create animator set with listeners
             AnimatorSet set = new AnimatorSet();
-            ValueAnimator scaleAnimator = ValueAnimator.ofFloat(initialScale, 1f);
-            scaleAnimator.addUpdateListener(animation -> {
-                float value = (float) animation.getAnimatedValue();
-                option.setScaleX(value);
-                option.setScaleY(value);
-                option.invalidate();
-            });
-            scaleAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
-
-            ValueAnimator alphaAnimator = ValueAnimator.ofFloat(0f, 1f);
-            alphaAnimator.addUpdateListener(animation -> {
-                option.setAlpha((float) animation.getAnimatedValue());
-            });
-            alphaAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
-
-            set.playTogether(scaleAnimator, alphaAnimator);
+            set.playTogether(
+                    ObjectAnimator.ofFloat(option, View.SCALE_X, initialScale, 1f),
+                    ObjectAnimator.ofFloat(option, View.SCALE_Y, initialScale, 1f),
+                    ObjectAnimator.ofFloat(option, View.ALPHA, 0f, 1f)
+            );
             set.setStartDelay(delay);
             set.setDuration(100);
             set.setInterpolator(CubicBezierInterpolator.DEFAULT);
-            set.addListener(new AnimatorListenerAdapter() {
-                @Override
-                public void onAnimationStart(Animator animation) {
-                    option.setScaleX(finalInitialScale);
-                    option.setScaleY(finalInitialScale);
-                    option.invalidate();
-                }
-            });
-
-            // Store appear animator in the option
-            option.appearAnimator = set;
             set.start();
         }
+    }
 
-        containerAnimator.start();
+    private void dismiss() {
+        if (dismissed) return;
+        dismissed = true;
+
+        AnimatorSet dismissSet = new AnimatorSet();
+        ArrayList<Animator> animators = new ArrayList<>();
+
+        ValueAnimator containerAnimator = ValueAnimator.ofFloat(1, 0);
+        containerAnimator.addUpdateListener(animation -> {
+            appearProgress = (float) animation.getAnimatedValue();
+            invalidate();
+        });
+        animators.add(containerAnimator);
+
+        for (ShareOption option : shareOptions) {
+            animators.add(ObjectAnimator.ofFloat(option, View.SCALE_X, option.getScaleX(), 0f));
+            animators.add(ObjectAnimator.ofFloat(option, View.SCALE_Y, option.getScaleY(), 0f));
+            animators.add(ObjectAnimator.ofFloat(option, View.ALPHA, option.getAlpha(), 0f));
+        }
+
+        dismissSet.playTogether(animators);
+        dismissSet.setDuration(180);
+        dismissSet.setInterpolator(CubicBezierInterpolator.DEFAULT);
+        dismissSet.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (getParent() != null) {
+                    WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+                    wm.removeView(ShareReactionLayout.this);
+                }
+                if (onDismissListener != null) {
+                    onDismissListener.onDismiss();
+                }
+            }
+        });
+        dismissSet.start();
     }
 
     @Override
-    public void onLayout(boolean changed, int l, int t, int r, int b) {
-        // Add logging to see view positions
+    protected void onLayout(boolean changed, int l, int t, int r, int b) {
         int itemSize = dp(36);
         int spacing = dp(4);
 
         float startX = containerRect.left + dp(8);
         float centerY = containerRect.top + (containerRect.height() - itemSize) / 2;
 
-        FileLog.d("ShareLayout onLayout: container at " + containerRect.left + "," + containerRect.top +
-                " size " + containerRect.width() + "x" + containerRect.height());
-
         for (int i = 0; i < shareOptions.size(); i++) {
             ShareOption option = shareOptions.get(i);
             int left = (int) (startX + i * (itemSize + spacing));
             int top = (int) centerY;
+            option.layout(left, top, left + itemSize, top + itemSize);
+        }
+    }
 
-            option.layout(
-                    left,
-                    top,
-                    left + itemSize,
-                    top + itemSize
+    @Override
+    protected void onDraw(Canvas canvas) {
+        if (dismissed) return;
+
+        int itemCount = shareOptions.size();
+        int itemSize = dp(36);
+        int itemSpacing = dp(4);
+        float sidePadding = dp(8);
+
+        float width = (itemCount * itemSize) + ((itemCount - 1) * itemSpacing) + (sidePadding * 2);
+        float height = dp(48);
+
+        containerRect.left = touchX - width / 2;
+        containerRect.right = containerRect.left + width;
+        containerRect.bottom = touchY - dp(40);
+        containerRect.top = containerRect.bottom - height;
+
+        if (containerRect.left < dp(16)) {
+            containerRect.left = dp(16);
+            containerRect.right = containerRect.left + width;
+        } else if (containerRect.right > getWidth() - dp(16)) {
+            containerRect.right = getWidth() - dp(16);
+            containerRect.left = containerRect.right - width;
+        }
+
+        if (!isFullyShown) {
+            canvas.save();
+            float scale = 0.5f + 0.5f * appearProgress;
+            canvas.scale(scale, scale, touchX, touchY);
+
+            morphProcessor.drawMorph(
+                    morphBitmap,
+                    containerRect.left - morphBgX + dp(10),
+                    containerRect.top - morphBgY + dp(10),
+                    containerRect.width() - dp(20),
+                    containerRect.height() - dp(20),
+                    dp(24),
+                    touchX - morphBgX,
+                    touchY - morphBgY,
+                    dp(16),
+                    appearProgress,
+                    Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground)
             );
 
-            FileLog.d("ShareLayout laid out option " + i + " at " + left + "," + top);
+            blurProcessor.processBitmap(morphBitmap, blurBitmap, dp(8) * (1f - appearProgress));
+
+            canvas.drawBitmap(morphBitmap, morphBgX, morphBgY, null);
+            canvas.drawBitmap(blurBitmap, 0, 0, null);
+
+            canvas.restore();
         }
+
+        containerPaint.setAlpha((int)(255 * appearProgress));
+        canvas.drawRoundRect(containerRect, dp(24), dp(24), containerPaint);
+
+        for (int i = 0; i < shareOptions.size(); i++) {
+            ShareOption option = shareOptions.get(i);
+            option.setAlpha(touchedOption == null || touchedOption == option ? 1f : 0.5f);
+        }
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (dismissed) return false;
+
+        float x = event.getRawX();
+        float y = event.getRawY() - AndroidUtilities.statusBarHeight;
+
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                return true;
+
+            case MotionEvent.ACTION_MOVE:
+                if (event.getEventTime() - event.getDownTime() > longPressTimeout) {
+                    checkForTouchedOption(x, y);
+                }
+                return true;
+
+            case MotionEvent.ACTION_UP:
+                if (touchedOption != null) {
+                    TLRPC.User selectedUser = touchedOption.getUser();
+                    if (selectedUser != null && messageObject != null) {
+                        ArrayList<MessageObject> messages = new ArrayList<>();
+                        messages.add(messageObject);
+
+                        SendMessagesHelper.getInstance(UserConfig.selectedAccount)
+                                .sendMessage(messages, selectedUser.id, false, false, true, 0);
+
+                        if (onShowBulletinCallback != null) {
+                            onShowBulletinCallback.apply(selectedUser);
+                        }
+
+                        animateAvatarToTarget(selectedUser);
+                    }
+                }
+                dismiss();
+                return true;
+        }
+        return false;
+    }
+
+    private void checkForTouchedOption(float x, float y) {
+        ShareOption prevTouched = touchedOption;
+        touchedOption = null;
+
+        for (ShareOption option : shareOptions) {
+            int[] location = new int[2];
+            option.getLocationOnScreen(location);
+
+            float left = location[0];
+            float top = location[1] - AndroidUtilities.statusBarHeight;
+            float right = left + option.getWidth();
+            float bottom = top + option.getHeight();
+
+            if (x >= left && x <= right && y >= top && y <= bottom) {
+                touchedOption = option;
+                if (prevTouched != touchedOption) {
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                }
+                break;
+            }
+        }
+
+        invalidate();
+    }
+
+    private void animateAvatarToTarget(TLRPC.User user) {
+        float startX = touchX - dp(18);
+        float startY = touchY - dp(18);
+
+        ShareOption targetOption = null;
+        for (ShareOption option : shareOptions) {
+            if (option.getUser() != null && option.getUser().id == user.id) {
+                targetOption = option;
+                break;
+            }
+        }
+
+        if (targetOption != null) {
+            int[] targetLocation = new int[2];
+            targetOption.getLocationInWindow(targetLocation);
+
+            float endX = targetLocation[0] + targetOption.getWidth() / 2f - dp(18);
+            float endY = targetLocation[1] - AndroidUtilities.statusBarHeight +
+                    targetOption.getHeight() / 2f - dp(18);
+
+            BackupImageView flyingAvatar = new BackupImageView(getContext());
+            flyingAvatar.setRoundRadius(dp(18));
+
+            AvatarDrawable avatarDrawable = new AvatarDrawable();
+            avatarDrawable.setInfo(user);
+            flyingAvatar.setForUserOrChat(user, avatarDrawable);
+            flyingAvatar.setSize(dp(36), dp(36));
+
+            WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+            );
+
+            FrameLayout overlay = new FrameLayout(getContext());
+            overlay.addView(flyingAvatar, LayoutHelper.createFrame(36, 36, Gravity.TOP | Gravity.LEFT));
+
+            WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+            wm.addView(overlay, params);
+
+            flyingAvatar.setTranslationX(startX);
+            flyingAvatar.setTranslationY(startY);
+
+            AnimatorSet set = new AnimatorSet();
+            set.playTogether(
+                    ObjectAnimator.ofFloat(flyingAvatar, View.TRANSLATION_X, startX, endX),
+                    ObjectAnimator.ofFloat(flyingAvatar, View.TRANSLATION_Y, startY, endY),
+                    ObjectAnimator.ofFloat(flyingAvatar, View.SCALE_X, 1f, 0.6f),
+                    ObjectAnimator.ofFloat(flyingAvatar, View.SCALE_Y, 1f, 0.6f),
+                    ObjectAnimator.ofFloat(flyingAvatar, View.ALPHA, 1f, 0f)
+            );
+
+            set.setDuration(300);
+            set.setInterpolator(CubicBezierInterpolator.EASE_OUT);
+            set.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    wm.removeView(overlay);
+                }
+            });
+            set.start();
+        }
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+
+        if (w <= 0 || h <= 0) return;
+
+        if (morphBitmap != null) {
+            morphBitmap.recycle();
+            morphBitmap = null;
+        }
+        if (blurBitmap != null) {
+            blurBitmap.recycle();
+            blurBitmap = null;
+        }
+
+        int surfaceWidth = w + bounceOffset * 2;
+        int surfaceHeight = h + bounceOffset;
+
+        morphBitmap = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888);
+        blurBitmap = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888);
+
+        blurProcessor.initSurface(surfaceWidth, surfaceHeight);
+        morphProcessor.initSurface(surfaceWidth, surfaceHeight);
+
+        morphBgX = bounceOffset;
+        morphBgY = bounceOffset;
+    }
+
+    private void recycleBitmaps() {
+        if (morphBitmap != null) {
+            morphBitmap.recycle();
+            morphBitmap = null;
+        }
+        if (blurBitmap != null) {
+            blurBitmap.recycle();
+            blurBitmap = null;
+        }
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        blurProcessor.onAttach();
+        morphProcessor.onAttach();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        blurProcessor.onDetach();
+        morphProcessor.onDetach();
+        recycleBitmaps();
+    }
+
+    public void setOnDismissListener(OnDismissListener listener) {
+        this.onDismissListener = listener;
+    }
+
+    public interface OnDismissListener {
+        void onDismiss();
     }
 
     private class ShareOption extends View {
