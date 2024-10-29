@@ -12797,6 +12797,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 bottomLayout.setTag(null);
                 bottomLayout.setVisibility(View.GONE);
             }
+            if (castItem != null) {
+                castItem.setVisibility(View.VISIBLE);
+            }
             if (slideshowMessageId == 0) {
                 imagesArr.add(messageObject);
                 if (messageObject.eventId != 0) {
@@ -12970,6 +12973,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 captionEdit.mentionContainer.getAdapter().setNeedBotContext(false);
             }
             if (sendPhotoType != SELECT_TYPE_NO_SELECT) {
+                if (castItem != null) {
+                    castItem.setVisibility(View.GONE);
+                }
                 pickerView.setVisibility(View.VISIBLE);
                 if (useFullWidthSendButton()) {
                     doneButtonFullWidth.setVisibility(View.VISIBLE);

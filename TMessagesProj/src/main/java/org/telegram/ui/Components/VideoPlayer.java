@@ -1636,7 +1636,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             // First try to find existing file
             String selection = MediaStore.MediaColumns.RELATIVE_PATH + "=? AND " +
                     MediaStore.MediaColumns.DISPLAY_NAME + "=?";
-            String[] selectionArgs = new String[]{"Telegram/Telegram Video", fileName};
+            String[] selectionArgs = new String[]{"Movies/Telegram", fileName};
             try (Cursor cursor = resolver.query(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                     null,
