@@ -1,32 +1,47 @@
-precision mediump float;
-
+precision highp float;
 varying vec2 v_TextCoord;
 
 uniform sampler2D u_Texture;
 uniform vec2 u_TexelOffset;
 uniform float u_Radius;
 
-float gaussian(float x, float sigma) {
-    return (1.0 / (sqrt(2.0 * 3.14159265359) * sigma)) * exp(-(x * x) / (2.0 * sigma * sigma));
-}
-
 void main() {
-    float sigma = 1.0 + u_Radius / 2.0;
-    vec4 color = vec4(0.0);
-    float weight_sum = 0.0;
+    vec4 centerPixel = texture2D(u_Texture, v_TextCoord);
 
-    for (int i = -int(u_Radius); i <= int(u_Radius); ++i) {
-        vec2 sampleCoords = v_TextCoord + float(i) * u_TexelOffset;
-        if (sampleCoords.x >= 0.0 && sampleCoords.x <= 1.0 && sampleCoords.y >= 0.0 && sampleCoords.y <= 1.0) {
-            float weight = gaussian(float(i), sigma);
-            color += texture2D(u_Texture, sampleCoords) * weight;
-            weight_sum += weight;
+    // If pixel is fully transparent, don't blur
+    if (centerPixel.a < 0.01) {
+        gl_FragColor = vec4(0.0);
+        return;
+    }
+
+    vec4 color = centerPixel;
+    float totalWeight = 1.0;
+    float radius = min(u_Radius, 8.0); // Limit maximum radius
+
+    for (float i = 1.0; i <= radius; i++) {
+        float weight = (radius - i + 1.0) / radius;
+
+        vec2 posOffset = v_TextCoord + i * u_TexelOffset;
+        vec2 negOffset = v_TextCoord - i * u_TexelOffset;
+
+        vec4 posColor = texture2D(u_Texture, posOffset);
+        vec4 negColor = texture2D(u_Texture, negOffset);
+
+        // Only blend if alpha difference is small
+        float posAlphaDiff = abs(centerPixel.a - posColor.a);
+        float negAlphaDiff = abs(centerPixel.a - negColor.a);
+
+        // Sharper alpha threshold
+        if (posAlphaDiff < 0.2) {
+            color += posColor * weight;
+            totalWeight += weight;
+        }
+
+        if (negAlphaDiff < 0.2) {
+            color += negColor * weight;
+            totalWeight += weight;
         }
     }
 
-    if (weight_sum > 0.0) {
-        gl_FragColor = color / weight_sum;
-    } else {
-        gl_FragColor = texture2D(u_Texture, v_TextCoord);
-    }
+    gl_FragColor = color / totalWeight;
 }

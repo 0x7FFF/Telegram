@@ -42,6 +42,7 @@ import android.graphics.Matrix;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PathMeasure;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.PorterDuffXfermode;
@@ -35633,20 +35634,26 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             return false;
         }
 
+        private float[] getPointOnPath(Path path, float fraction) {
+            float[] coords = new float[2];
+            PathMeasure pathMeasure = new PathMeasure(path, false);
+            pathMeasure.getPosTan(pathMeasure.getLength() * fraction, coords, null);
+            return coords;
+        }
+
         @Override
         public boolean didLongPressShareButton(ChatMessageCell cell, float touchX, float touchY) {
             ShareReactionLayout shareLayout = new ShareReactionLayout(getContext());
-            ArrayList<TLRPC.Dialog> recentDialogs = new ArrayList<TLRPC.Dialog>();
 
+            ArrayList<TLRPC.Dialog> recentDialogs = new ArrayList<>();
             if (!MessagesController.getInstance(currentAccount).dialogsForward.isEmpty()) {
                 recentDialogs.addAll(MessagesController.getInstance(currentAccount).dialogsForward);
             }
 
             int size = Math.min(recentDialogs.size(), 5);
-            ArrayList<TLRPC.User> users = new ArrayList<TLRPC.User>();
+            ArrayList<TLRPC.User> users = new ArrayList<>();
 
             int index = 0;
-
             while (users.size() < size && index < recentDialogs.size()) {
                 TLRPC.Dialog dialog = recentDialogs.get(index);
                 long id = dialog.id;
@@ -35654,11 +35661,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     id = -id;
                 }
                 TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(id);
-
                 if (user != null) {
                     users.add(user);
                 }
-
                 index++;
             }
 
@@ -35666,12 +35671,108 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             cell.setShareOnDismissCallback(() -> {
                 chatLayoutManager.setCanScrollVertically(true);
             });
+
+            // Get cell location in window coordinates
+            int[] cellLocation = new int[2];
+            cell.getLocationInWindow(cellLocation);
+
+            // Calculate absolute touch coordinates
+            float absoluteX = cellLocation[0] + touchX;
+            float absoluteY = cellLocation[1] + touchY;
+
+            FileLog.d(String.format("Share Cell location: %d, %d", cellLocation[0], cellLocation[1]));
+            FileLog.d(String.format("Share Original touch coordinates: %f, %f", touchX, touchY));
+            FileLog.d(String.format("Share Absolute coordinates: %f, %f", absoluteX, absoluteY));
+
+            shareLayout.setShareSelectedListener((selectedUser, sourceView, targetView) -> {
+                int[] targetLocation = new int[2];
+                targetView.getLocationInWindow(targetLocation);
+
+                // Log coordinates for verification
+                FileLog.d(String.format("Share Target location: %d, %d", targetLocation[0], targetLocation[1]));
+
+                // Create flying avatar
+                BackupImageView flyingAvatar = new BackupImageView(getParentActivity());
+                flyingAvatar.setRoundRadius(dp(18));
+
+                AvatarDrawable avatarDrawable = new AvatarDrawable();
+                avatarDrawable.setInfo(selectedUser);
+                flyingAvatar.setForUserOrChat(selectedUser, avatarDrawable);
+                flyingAvatar.setSize(dp(36), dp(36));
+
+                // Add to DecorView
+                android.view.ViewGroup decorView = (ViewGroup) getParentActivity().getWindow().getDecorView();
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(36), dp(36));
+                decorView.addView(flyingAvatar, params);
+
+                // Use absolute coordinates for start position
+                float startX = absoluteX - dp(18); // Center the avatar on touch point
+                float startY = absoluteY - dp(18);
+
+                // Calculate end position (center of target avatar)
+                float endX = targetLocation[0] + targetView.getWidth() / 2f - dp(18);
+                float endY = targetLocation[1] + targetView.getHeight() / 2f - dp(18);
+
+                // Log final calculated positions
+                FileLog.d(String.format("Share Animation start: %f, %f", startX, startY));
+                FileLog.d(String.format("Share Animation end: %f, %f", endX, endY));
+
+                flyingAvatar.setTranslationX(startX);
+                flyingAvatar.setTranslationY(startY);
+
+                // Create bezier path for smoother animation
+                Path animPath = new Path();
+                animPath.moveTo(startX, startY);
+
+                // Control point for bezier curve (midpoint with some vertical offset)
+                float controlX = (startX + endX) / 2f;
+                float controlY = Math.min(startY, endY) - dp(100); // Add some arc to the animation
+
+                animPath.quadTo(controlX, controlY, endX, endY);
+
+                ValueAnimator pathAnimator = ValueAnimator.ofFloat(0, 1);
+                pathAnimator.addUpdateListener(animation -> {
+                    float fraction = (float) animation.getAnimatedValue();
+                    float[] point = getPointOnPath(animPath, fraction);
+                    flyingAvatar.setTranslationX(point[0]);
+                    flyingAvatar.setTranslationY(point[1]);
+                });
+
+                AnimatorSet animatorSet = new AnimatorSet();
+                animatorSet.playTogether(
+                        pathAnimator,
+                        ObjectAnimator.ofFloat(flyingAvatar, View.SCALE_X, 1f, 0.6f),
+                        ObjectAnimator.ofFloat(flyingAvatar, View.SCALE_Y, 1f, 0.6f),
+                        ObjectAnimator.ofFloat(flyingAvatar, View.ALPHA, 1f, 0f)
+                );
+
+                animatorSet.setDuration(300);
+                animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT);
+                animatorSet.addListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        if (flyingAvatar.getParent() != null) {
+                            decorView.removeView(flyingAvatar);
+                        }
+                    }
+                });
+                animatorSet.start();
+            });
+
+            // Disable scrolling before showing
             chatLayoutManager.setCanScrollVertically(false);
+
             shareLayout.show(contentView, cell.getMessageObject(), users, touchX, lastTouchY, user -> {
-                SpannableStringBuilder userName = AndroidUtilities.replaceTags(LocaleController.formatString("FwdMessageToUser", R.string.FwdMessageToUser, UserObject.getFirstName(user)));
-                BulletinFactory.of(ChatActivity.this).createSimpleBulletin(R.raw.forward, userName).show(false);
+                SpannableStringBuilder userName = AndroidUtilities.replaceTags(
+                        LocaleController.formatString("FwdMessageToUser",
+                                R.string.FwdMessageToUser,
+                                UserObject.getFirstName(user)));
+                BulletinFactory.of(ChatActivity.this)
+                        .createSimpleBulletin(R.raw.forward, userName)
+                        .show(false);
                 return null;
             });
+
             return true;
         }
 

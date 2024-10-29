@@ -24,6 +24,7 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
@@ -64,6 +65,16 @@ public class ShareReactionLayout extends FrameLayout {
     private float morphBgX, morphBgY;
     private OnDismissListener onDismissListener;
     private final int longPressTimeout;
+
+    public interface OnShareSelectedListener {
+        void onShareSelected(TLRPC.User user, View sourceView, View targetView);
+    }
+
+    private OnShareSelectedListener shareSelectedListener;
+
+    public void setShareSelectedListener(OnShareSelectedListener listener) {
+        this.shareSelectedListener = listener;
+    }
 
     public ShareReactionLayout(Context context) {
         super(context);
@@ -118,8 +129,8 @@ public class ShareReactionLayout extends FrameLayout {
 
     private void animateAppear() {
         ValueAnimator animator = ValueAnimator.ofFloat(0, 1);
-        animator.setDuration(250);
-        animator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        animator.setDuration(125);
+        animator.setInterpolator(new DecelerateInterpolator());
         animator.addUpdateListener(animation -> {
             appearProgress = (float) animation.getAnimatedValue();
             invalidate();
@@ -175,6 +186,15 @@ public class ShareReactionLayout extends FrameLayout {
     private void dismiss() {
         if (dismissed) return;
         dismissed = true;
+
+        recycleBitmaps();
+
+        if (blurProcessor != null) {
+            blurProcessor.onDetach();
+        }
+        if (morphProcessor != null) {
+            morphProcessor.onDetach();
+        }
 
         AnimatorSet dismissSet = new AnimatorSet();
         ArrayList<Animator> animators = new ArrayList<>();
@@ -327,7 +347,9 @@ public class ShareReactionLayout extends FrameLayout {
                             onShowBulletinCallback.apply(selectedUser);
                         }
 
-                        animateAvatarToTarget(selectedUser);
+                        if (shareSelectedListener != null) {
+                            shareSelectedListener.onShareSelected(selectedUser, this, touchedOption);
+                        }
                     }
                 }
                 dismiss();
@@ -361,88 +383,13 @@ public class ShareReactionLayout extends FrameLayout {
         invalidate();
     }
 
-    private void animateAvatarToTarget(TLRPC.User user) {
-        float startX = touchX - dp(18);
-        float startY = touchY - dp(18);
-
-        ShareOption targetOption = null;
-        for (ShareOption option : shareOptions) {
-            if (option.getUser() != null && option.getUser().id == user.id) {
-                targetOption = option;
-                break;
-            }
-        }
-
-        if (targetOption != null) {
-            int[] targetLocation = new int[2];
-            targetOption.getLocationInWindow(targetLocation);
-
-            float endX = targetLocation[0] + targetOption.getWidth() / 2f - dp(18);
-            float endY = targetLocation[1] - AndroidUtilities.statusBarHeight +
-                    targetOption.getHeight() / 2f - dp(18);
-
-            BackupImageView flyingAvatar = new BackupImageView(getContext());
-            flyingAvatar.setRoundRadius(dp(18));
-
-            AvatarDrawable avatarDrawable = new AvatarDrawable();
-            avatarDrawable.setInfo(user);
-            flyingAvatar.setForUserOrChat(user, avatarDrawable);
-            flyingAvatar.setSize(dp(36), dp(36));
-
-            WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
-                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
-                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSLUCENT
-            );
-
-            FrameLayout overlay = new FrameLayout(getContext());
-            overlay.addView(flyingAvatar, LayoutHelper.createFrame(36, 36, Gravity.TOP | Gravity.LEFT));
-
-            WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
-            wm.addView(overlay, params);
-
-            flyingAvatar.setTranslationX(startX);
-            flyingAvatar.setTranslationY(startY);
-
-            AnimatorSet set = new AnimatorSet();
-            set.playTogether(
-                    ObjectAnimator.ofFloat(flyingAvatar, View.TRANSLATION_X, startX, endX),
-                    ObjectAnimator.ofFloat(flyingAvatar, View.TRANSLATION_Y, startY, endY),
-                    ObjectAnimator.ofFloat(flyingAvatar, View.SCALE_X, 1f, 0.6f),
-                    ObjectAnimator.ofFloat(flyingAvatar, View.SCALE_Y, 1f, 0.6f),
-                    ObjectAnimator.ofFloat(flyingAvatar, View.ALPHA, 1f, 0f)
-            );
-
-            set.setDuration(300);
-            set.setInterpolator(CubicBezierInterpolator.EASE_OUT);
-            set.addListener(new AnimatorListenerAdapter() {
-                @Override
-                public void onAnimationEnd(Animator animation) {
-                    wm.removeView(overlay);
-                }
-            });
-            set.start();
-        }
-    }
-
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
 
         if (w <= 0 || h <= 0) return;
 
-        if (morphBitmap != null) {
-            morphBitmap.recycle();
-            morphBitmap = null;
-        }
-        if (blurBitmap != null) {
-            blurBitmap.recycle();
-            blurBitmap = null;
-        }
+        recycleBitmaps();
 
         int surfaceWidth = w + bounceOffset * 2;
         int surfaceHeight = h + bounceOffset;
@@ -450,8 +397,9 @@ public class ShareReactionLayout extends FrameLayout {
         morphBitmap = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888);
         blurBitmap = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888);
 
-        blurProcessor.initSurface(surfaceWidth, surfaceHeight);
+        // Initialize with exact dimensions
         morphProcessor.initSurface(surfaceWidth, surfaceHeight);
+        blurProcessor.initSurface(surfaceWidth, surfaceHeight);
 
         morphBgX = bounceOffset;
         morphBgY = bounceOffset;

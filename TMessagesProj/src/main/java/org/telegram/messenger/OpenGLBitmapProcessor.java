@@ -227,8 +227,12 @@ public class OpenGLBitmapProcessor {
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        GLES20.glClearColor(0, 0, 0, 0); // Set clear color to transparent
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+
         setupVertexAttributes();
+
+        GLES20.glFinish();
 
         readPixels(dst);
         cleanup();
@@ -248,7 +252,9 @@ public class OpenGLBitmapProcessor {
 
         // 1 pass - X
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboIds[0]);
-        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, textureIds[0], 0);
+        GLES20.glFramebufferTexture2D(
+                GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, textureIds[0], 0);
+        GLES20.glClearColor(0, 0, 0, 0); // Set clear color to transparent
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
         GLES20.glUseProgram(program);
@@ -269,6 +275,7 @@ public class OpenGLBitmapProcessor {
 
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
         setupVertexAttributes();
+        GLES20.glFinish();
     }
 
     private void setupVertexAttributes() {
