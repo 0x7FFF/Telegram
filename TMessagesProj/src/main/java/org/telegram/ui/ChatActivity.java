@@ -35672,11 +35672,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 chatLayoutManager.setCanScrollVertically(true);
             });
 
-            // Get cell location in window coordinates
             int[] cellLocation = new int[2];
             cell.getLocationInWindow(cellLocation);
 
-            // Calculate absolute touch coordinates
             float absoluteX = cellLocation[0] + touchX;
             float absoluteY = cellLocation[1] + touchY;
 
@@ -35685,13 +35683,22 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             FileLog.d(String.format("Share Absolute coordinates: %f, %f", absoluteX, absoluteY));
 
             shareLayout.setShareSelectedListener((selectedUser, sourceView, targetView) -> {
-                int[] targetLocation = new int[2];
-                targetView.getLocationInWindow(targetLocation);
+                int screenWidth = AndroidUtilities.displaySize.x;
+                int screenHeight = AndroidUtilities.displaySize.y;
 
-                // Log coordinates for verification
-                FileLog.d(String.format("Share Target location: %d, %d", targetLocation[0], targetLocation[1]));
+                float startX = absoluteX - dp(18);
+                float startY = absoluteY - dp(18);
 
-                // Create flying avatar
+                // Target the bottom left corner area where forward indicators appear
+                float endX = dp(48);  // Some padding from left
+                float endY = screenHeight - dp(96); // Some padding from bottom
+
+                // Calculate distance and angle for logging
+                float deltaX = endX - startX;
+                float deltaY = endY - startY;
+                float distance = (float) Math.hypot(deltaX, deltaY);
+                float angle = (float) Math.toDegrees(Math.atan2(deltaY, deltaX));
+
                 BackupImageView flyingAvatar = new BackupImageView(getParentActivity());
                 flyingAvatar.setRoundRadius(dp(18));
 
@@ -35700,33 +35707,20 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 flyingAvatar.setForUserOrChat(selectedUser, avatarDrawable);
                 flyingAvatar.setSize(dp(36), dp(36));
 
-                // Add to DecorView
                 android.view.ViewGroup decorView = (ViewGroup) getParentActivity().getWindow().getDecorView();
                 FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(36), dp(36));
                 decorView.addView(flyingAvatar, params);
 
-                // Use absolute coordinates for start position
-                float startX = absoluteX - dp(18); // Center the avatar on touch point
-                float startY = absoluteY - dp(18);
-
-                // Calculate end position (center of target avatar)
-                float endX = targetLocation[0] + targetView.getWidth() / 2f - dp(18);
-                float endY = targetLocation[1] + targetView.getHeight() / 2f - dp(18);
-
-                // Log final calculated positions
-                FileLog.d(String.format("Share Animation start: %f, %f", startX, startY));
-                FileLog.d(String.format("Share Animation end: %f, %f", endX, endY));
-
                 flyingAvatar.setTranslationX(startX);
                 flyingAvatar.setTranslationY(startY);
 
-                // Create bezier path for smoother animation
                 Path animPath = new Path();
                 animPath.moveTo(startX, startY);
 
-                // Control point for bezier curve (midpoint with some vertical offset)
+                float verticalDistance = Math.abs(endY - startY);
+                float arcHeight = Math.min(dp(300), verticalDistance * 0.5f);
                 float controlX = (startX + endX) / 2f;
-                float controlY = Math.min(startY, endY) - dp(100); // Add some arc to the animation
+                float controlY = Math.min(startY, endY) - arcHeight;
 
                 animPath.quadTo(controlX, controlY, endX, endY);
 
@@ -35736,7 +35730,21 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     float[] point = getPointOnPath(animPath, fraction);
                     flyingAvatar.setTranslationX(point[0]);
                     flyingAvatar.setTranslationY(point[1]);
+
+                    // Calculate current distance to target for logging
+                    float currentX = point[0] - endX;
+                    float currentY = point[1] - endY;
+                    float currentDistance = (float) Math.hypot(currentX, currentY);
+
+                    if (fraction % 0.1f < 0.01f) {
+                        FileLog.d(String.format("Share Progress: %.0f%%, Distance to target: %.1f dp",
+                                fraction * 100, currentDistance / AndroidUtilities.density));
+                    }
                 });
+
+                int baseDuration = 500; // Much faster base duration
+                int distanceFactorDuration = (int)(distance * 0.4f); // Less time per pixel
+                int duration = Math.max(baseDuration, Math.min(800, distanceFactorDuration)); // Lower max duration
 
                 AnimatorSet animatorSet = new AnimatorSet();
                 animatorSet.playTogether(
@@ -35746,11 +35754,12 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                         ObjectAnimator.ofFloat(flyingAvatar, View.ALPHA, 1f, 0f)
                 );
 
-                animatorSet.setDuration(300);
+                animatorSet.setDuration(duration);
                 animatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT);
                 animatorSet.addListener(new AnimatorListenerAdapter() {
                     @Override
                     public void onAnimationEnd(Animator animation) {
+                        FileLog.d("Share disappear called!");
                         if (flyingAvatar.getParent() != null) {
                             decorView.removeView(flyingAvatar);
                         }
@@ -35758,6 +35767,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 });
                 animatorSet.start();
             });
+
 
             // Disable scrolling before showing
             chatLayoutManager.setCanScrollVertically(false);
