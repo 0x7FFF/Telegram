@@ -118,7 +118,7 @@ public class ProfileAvatarBlurHelper {
 
         @Override
         public void onSizeChanged(int w, int h) {
-            float scaleY = Math.max(0.1f, getScaleY());
+            float scaleY = Math.max(0.2f, getScaleY());
             scaleFactor = 20f / scaleY;
             drawn = false;
 
