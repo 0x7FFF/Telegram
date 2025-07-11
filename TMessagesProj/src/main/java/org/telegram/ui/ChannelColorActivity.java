@@ -2,7 +2,6 @@ package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.AndroidUtilities.dpf2;
-import static org.telegram.messenger.LocaleController.getString;
 import static org.telegram.ui.Components.Premium.LimitReachedBottomSheet.TYPE_BOOSTS_FOR_CUSTOM_EMOJI_PACK;
 
 import android.animation.Animator;
@@ -1447,10 +1446,19 @@ public class ChannelColorActivity extends BaseFragment implements NotificationCe
 
         public ProfilePreview(Context context) {
             super(context);
-            backgroundView = new PeerColorActivity.ColoredActionBar(getContext(), resourceProvider);
+            backgroundView = new PeerColorActivity.ColoredActionBar(getContext(), resourceProvider, currentAccount, dialogId) {
+                @Override
+                protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                    if (isGroup) {
+                        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(dp(256) + ActionBar.getCurrentActionBarHeight() / 2, MeasureSpec.EXACTLY));
+                    } else {
+                        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                    }
+                }
+            };
             backgroundView.setProgressToGradient(1f);
             backgroundView.ignoreMeasure = true;
-            addView(backgroundView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, isGroup ? 194 : 134, Gravity.FILL));
+            addView(backgroundView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, isGroup ? 0 : 232, Gravity.FILL));
             profileView = new PeerColorActivity.ProfilePreview(getContext(), currentAccount, dialogId, resourceProvider){
                 @Override
                 public void setColor(int colorId, boolean animated) {
@@ -1459,8 +1467,17 @@ public class ChannelColorActivity extends BaseFragment implements NotificationCe
                         textInfo1.setTextColor(profileView.subtitleView.getTextColor());
                     }
                 }
+
+                @Override
+                protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                    if (isGroup) {
+                        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(dp(232) + ActionBar.getCurrentActionBarHeight() / 2, MeasureSpec.EXACTLY));
+                    } else {
+                        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                    }
+                }
             };
-            addView(profileView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 104, Gravity.BOTTOM, 0, 0, 0, isGroup ? 24: 0));
+            addView(profileView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, isGroup ? 0 : 232, Gravity.BOTTOM, 0, 0, 0, isGroup ? 24: 0));
 
             if (needBoostInfoSection()) {
                 title = new SimpleTextView(getContext());
